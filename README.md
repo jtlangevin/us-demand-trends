@@ -1,4 +1,3 @@
-# Summarizing US energy demand {: .no_toc }
 Key demand-side snapshots and trends for the US energy sector.
 
 * TOC

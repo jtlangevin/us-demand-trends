@@ -1,6 +1,7 @@
 # Summarizing US energy demand
 Key demand-side snapshots and trends for the US energy sector.
 
+{:toc}
 
 # Affordability
 

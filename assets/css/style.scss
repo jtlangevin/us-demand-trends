@@ -1,0 +1,20 @@
+---
+---
+@import "{{ site.theme }}";
+
+/* Overrides for GitHub Pages default themes */
+
+/* For Primer-based themes */
+.container-lg {
+  max-width: 90% !important; /* Adjust percentage as needed */
+}
+
+/* For Minima-based themes */
+.wrapper {
+  max-width: 90% !important;
+}
+
+/* For some older Jekyll themes */
+.main-content {
+  max-width: 90% !important;
+}

@@ -52,7 +52,7 @@ def fetch_eia_v2_data(route, params, api_key):
 
 def plot_energy_burden(output_dir):
     """Superimposes electric vs total energy burden dual-map HTML."""
-    print("Plotting: Combined energy burden by state (EIA RECS)...")
+    print("Plotting: Energy burden by state (EIA RECS)...")
     recs_url = (
         "https://www.eia.gov/consumption/residential/"
         "data/2020/csv/recs2020_public_v5.csv"
@@ -83,103 +83,107 @@ def plot_energy_burden(output_dir):
     state_burden = df.groupby('state_postal')[cols].median().reset_index()
     state_burden = state_burden.sort_values('Total_Burden_Pct', ascending=True)
 
-    # 1. Build the Layered Plotly Bar Chart
-    fig_bar = go.Figure()
+    max_burden = state_burden['Total_Burden_Pct'].max()
 
-    fig_bar.add_trace(go.Bar(
-        y=state_burden['state_postal'],
-        x=state_burden['Total_Burden_Pct'],
-        name='Total Energy Burden',
-        orientation='h',
-        marker=dict(color='lightgray'),
-        hovertemplate="Total Burden: %{x:.2f}%<extra></extra>"
-    ))
-
-    fig_bar.add_trace(go.Bar(
-        y=state_burden['state_postal'],
-        x=state_burden['Electric_Burden_Pct'],
-        name='Electric Burden Only',
-        orientation='h',
-        marker=dict(color='#636EFA'),
-        hovertemplate="Electric Burden: %{x:.2f}%<extra></extra>"
-    ))
-
-    fig_bar.update_layout(
-        barmode='overlay',
-        title="Energy Burden: Electric and Across Fuels",
-        xaxis_title="Median Energy Burden (% of Income)",
-        yaxis_title="State",
-        margin={"r": 20, "t": 40, "l": 20, "b": 20},
-        legend=dict(
-            x=0.75, y=0.05, bgcolor='rgba(255,255,255,0.9)',
-            bordercolor='lightgray', borderwidth=1
+    # ==========================================
+    # BUILD COMBINED DASHBOARD
+    # ==========================================
+    fig = make_subplots(
+        rows=2, cols=2,
+        row_heights=[0.3, 0.7],
+        vertical_spacing=0.15,  # Increased to create more gap below maps
+        specs=[
+            [{'type': 'choropleth'}, {'type': 'choropleth'}],  # Top: Maps
+            [{'type': 'bar', 'colspan': 2}, None]              # Bottom: Bar
+        ],
+        subplot_titles=(
+            "Total Energy Burden",
+            "Electric Energy Burden",
+            "Total and Electric Energy Burden by State"
         )
     )
 
-    # Save Bar Chart HTML & PNG
-    html_bar_path = f"{output_dir}/energy_burden_bar.html"
-    fig_bar.write_html(
-        html_bar_path,
-        default_width='70%',
-        default_height='97vh'
-    )
-    print(f" -> Success! Bar chart HTML saved to {html_bar_path}")
-
-    pio.defaults.mathjax = False
-    # fig_bar.write_image(
-    #     f"{output_dir}/energy_burden_bar.png",
-    #     width=1000,
-    #     height=1200
-    # )
-
-    # 2. Build the Side-by-Side Choropleth Maps
-    fig_maps = make_subplots(
-        rows=1, cols=2,
-        specs=[[{'type': 'choropleth'}, {'type': 'choropleth'}]],
-        subplot_titles=("Total Energy Burden", "Electric Energy Burden")
-    )
-
-    max_burden = state_burden['Total_Burden_Pct'].max()
-
-    fig_maps.add_trace(
+    # --- ROW 1: THE MAPS ---
+    fig.add_trace(
         go.Choropleth(
             locations=state_burden['state_postal'],
             z=state_burden['Total_Burden_Pct'],
             locationmode="USA-states",
             colorscale="magma",
             zmin=0, zmax=max_burden,
-            colorbar=dict(title="%", x=0.46, len=0.75),
-            hovertemplate="<b>%{location}</b><br>Total: %{z:.2f}%<extra></extra>"
+            colorbar=dict(title="Median %", x=0.46, len=0.3, y=0.8),
+            hovertemplate=(
+                "<b>%{location}</b><br>Total: %{z:.2f}%<extra></extra>"
+            )
         ),
         row=1, col=1
     )
 
-    fig_maps.add_trace(
+    fig.add_trace(
         go.Choropleth(
             locations=state_burden['state_postal'],
             z=state_burden['Electric_Burden_Pct'],
             locationmode="USA-states",
             colorscale="magma",
             zmin=0, zmax=max_burden,
-            colorbar=dict(title="%", x=1.02, len=0.75),
-            hovertemplate="<b>%{location}</b><br>Elec: %{z:.2f}%<extra></extra>"
+            colorbar=dict(title="Median %", x=1.02, len=0.3, y=0.8),
+            hovertemplate=(
+                "<b>%{location}</b><br>Elec: %{z:.2f}%<extra></extra>"
+            )
         ),
         row=1, col=2
     )
 
-    fig_maps.update_layout(
+    # --- ROW 2: THE BAR CHART ---
+    fig.add_trace(go.Bar(
+        y=state_burden['state_postal'],
+        x=state_burden['Total_Burden_Pct'],
+        name='Total Energy Burden',
+        orientation='h',
+        marker=dict(color='lightgray'),
+        hovertemplate="Total Burden: %{x:.2f}%<extra></extra>"
+    ), row=2, col=1)
+
+    fig.add_trace(go.Bar(
+        y=state_burden['state_postal'],
+        x=state_burden['Electric_Burden_Pct'],
+        name='Electric Burden Only',
+        orientation='h',
+        marker=dict(color='#636EFA'),
+        hovertemplate="Electric Burden: %{x:.2f}%<extra></extra>"
+    ), row=2, col=1)
+
+    # --- LAYOUT & STYLING ---
+    fig.update_layout(
+        height=1600,
+        barmode='overlay',  # Overlays the electric bars onto total bars
         geo=dict(scope='usa', projection_type='albers usa'),
         geo2=dict(scope='usa', projection_type='albers usa'),
-        margin={"r": 0, "t": 60, "l": 0, "b": 0}
+        margin={"r": 20, "t": 60, "l": 20, "b": 100},  # Extra bottom margin
+        legend=dict(
+            orientation="h",
+            yanchor="top",
+            y=-0.04,  # Moved below the bar plot to prevent crowding
+            xanchor="center",
+            x=0.5
+        )
     )
 
-    html_maps_path = f"{output_dir}/energy_burden_maps.html"
-    fig_maps.write_html(
+    # Add specific axes labels for the bar chart
+    fig.update_xaxes(
+        title_text="Median Energy Burden (% of Income)",
+        domain=[0.15, 0.85],  # Narrowed the bar chart width
+        row=2, col=1
+    )
+    fig.update_yaxes(title_text="State", row=2, col=1)
+
+    html_maps_path = f"{output_dir}/energy_burden_maps_bar.html"
+    fig.write_html(
         html_maps_path,
         default_width='95%',
-        default_height='70vh'
+        default_height='100%'
     )
-    print(f" -> Success! Energy burden HTMLs saved to {html_maps_path}")
+    print(f" -> Success! Energy burden HTML saved to {html_maps_path}")
 
 
 def plot_fuel_price_ratio(eia_key, output_dir):
@@ -228,9 +232,13 @@ def plot_fuel_price_ratio(eia_key, output_dir):
     df_ng_res = get_ng_data("PRS", "NG_Dol_Mcf_RES")
     df_ng_com = get_ng_data("PCS", "NG_Dol_Mcf_COM")
 
-    df_merged = df_elec_res.merge(df_elec_com, on=['State', 'Year'], how='inner')\
-        .merge(df_ng_res, on=['State', 'Year'], how='inner')\
-        .merge(df_ng_com, on=['State', 'Year'], how='inner')
+    df_merged = pd.merge(
+        df_elec_res, df_elec_com, on=['State', 'Year'], how='inner'
+    ).merge(
+        df_ng_res, on=['State', 'Year'], how='inner'
+    ).merge(
+        df_ng_com, on=['State', 'Year'], how='inner'
+    )
 
     state_counts = df_merged.groupby('Year')['State'].nunique()
     if state_counts.empty:
@@ -260,77 +268,87 @@ def plot_fuel_price_ratio(eia_key, output_dir):
 
     df_final = df_final.sort_values('Ratio_RES', ascending=True)
 
-    fig_bar = go.Figure()
-    fig_bar.add_trace(go.Bar(
-        y=df_final['State'], x=df_final['Ratio_RES'],
-        name='Residential Customers', orientation='h',
-        marker=dict(color='#636EFA'),
-        hovertemplate="Residential: %{x:.2f}x<extra></extra>"
-    ))
-    fig_bar.add_trace(go.Bar(
-        y=df_final['State'], x=df_final['Ratio_COM'],
-        name='Commercial Customers', orientation='h',
-        marker=dict(color='#EF553B'),
-        hovertemplate="Commercial: %{x:.2f}x<extra></extra>"
-    ))
-
-    fig_bar.update_layout(
-        barmode='group',
-        title=f"Fuel Price Ratios: Electric vs. Gas ({target_year})",
-        xaxis_title="Price Ratio (Electric vs. Gas)", yaxis_title="State",
-        margin={"r": 20, "t": 40, "l": 20, "b": 20},
-        legend=dict(x=0.75, y=0.05, bgcolor='rgba(255,255,255,0.9)')
+    # ==========================================
+    # BUILD COMBINED DASHBOARD
+    # ==========================================
+    fig = make_subplots(
+        rows=2, cols=2,
+        row_heights=[0.3, 0.7],
+        vertical_spacing=0.15,  # Increased to create more gap below maps
+        specs=[
+            [{'type': 'choropleth'}, {'type': 'choropleth'}],
+            [{'type': 'bar', 'colspan': 2}, None]
+        ],
+        subplot_titles=(
+            f"Residential Customers ({target_year})",
+            f"Commercial Customers ({target_year})",
+            "Electric vs. Gas Price Ratio by State"
+        )
     )
 
-    html_bar_path = f"{output_dir}/fuel_price_ratio_bar.html"
-    fig_bar.write_html(
-        html_bar_path,
-        default_width='70%',
-        default_height='99vh'
-    )
-    pio.defaults.mathjax = False
-    # fig_bar.write_image(
-    #     f"{output_dir}/fuel_price_ratio_bar.png",
-    #     width=1000,
-    #     height=1200
-    # )
-
-    fig_maps = make_subplots(
-        rows=1, cols=2,
-        specs=[[{'type': 'choropleth'}, {'type': 'choropleth'}]],
-        subplot_titles=("Residential Customers", "Commercial Customers")
-    )
-
-    fig_maps.add_trace(
+    # --- ROW 1: THE MAPS ---
+    fig.add_trace(
         go.Choropleth(
             locations=df_final['State'], z=df_final['Ratio_RES'],
             locationmode="USA-states", colorscale="viridis",
-            colorbar=dict(title="Elec/Gas<br>Price Ratio", x=0.46, len=0.75),
+            colorbar=dict(title="Elec/Gas<br>Price Ratio", x=0.46,
+                          len=0.3, y=0.8),
             hovertemplate="<b>%{location}</b><br>Res: %{z:.2f}x<extra></extra>"
         ), row=1, col=1
     )
 
-    fig_maps.add_trace(
+    fig.add_trace(
         go.Choropleth(
             locations=df_final['State'], z=df_final['Ratio_COM'],
             locationmode="USA-states", colorscale="plasma",
-            colorbar=dict(title="Elec/Gas<br>Price Ratio", x=1.02, len=0.75),
+            colorbar=dict(title="Elec/Gas<br>Price Ratio", x=1.02,
+                          len=0.3, y=0.8),
             hovertemplate="<b>%{location}</b><br>Com: %{z:.2f}x<extra></extra>"
         ), row=1, col=2
     )
 
-    fig_maps.update_layout(
+    # --- ROW 2: THE BAR CHART ---
+    fig.add_trace(go.Bar(
+        y=df_final['State'], x=df_final['Ratio_RES'],
+        name='Residential Customers', orientation='h',
+        marker=dict(color='#636EFA'),
+        hovertemplate="Residential: %{x:.2f}x<extra></extra>"
+    ), row=2, col=1)
+
+    fig.add_trace(go.Bar(
+        y=df_final['State'], x=df_final['Ratio_COM'],
+        name='Commercial Customers', orientation='h',
+        marker=dict(color='#EF553B'),
+        hovertemplate="Commercial: %{x:.2f}x<extra></extra>"
+    ), row=2, col=1)
+
+    # --- LAYOUT & STYLING ---
+    fig.update_layout(
+        height=1600,
+        barmode='group',
         geo=dict(scope='usa', projection_type='albers usa'),
         geo2=dict(scope='usa', projection_type='albers usa'),
-        margin={"r": 0, "t": 60, "l": 0, "b": 0}
+        margin={"r": 20, "t": 60, "l": 20, "b": 100},  # Extra bottom margin
+        legend=dict(
+            orientation="h",
+            yanchor="top",
+            y=-0.04,  # Moved below the bar plot to prevent crowding
+            xanchor="center",
+            x=0.5
+        )
     )
-    html_maps_path = f"{output_dir}/fuel_price_ratio_maps.html"
-    fig_maps.write_html(
+
+    # Narrow the Bar Chart Domain (pulls the sides in to 15% and 85%)
+    fig.update_xaxes(title_text="Price Ratio", domain=[0.15, 0.85], row=2, col=1)
+    fig.update_yaxes(title_text="State", row=2, col=1)
+
+    html_maps_path = f"{output_dir}/fuel_price_ratio_maps_bar.html"
+    fig.write_html(
         html_maps_path,
         default_width='95%',
-        default_height='70vh'
+        default_height='100%'
     )
-    print(f" -> Success! Fuel price ratio HTML saved to {html_maps_path}")
+    print(f" -> Success! Fuel price HTML saved to {html_maps_path}")
 
 
 def plot_permits_construction(census_key, output_dir):
@@ -1632,15 +1650,15 @@ def main():
         os.makedirs(output_dir)
 
     try:
-        eia_df = generate_eia_mapping_df()
+        # eia_df = generate_eia_mapping_df()
         plot_energy_burden(output_dir)
         plot_fuel_price_ratio(eia_key, output_dir)
-        plot_permits_construction(census_key, output_dir)
-        plot_county_heating_equipment(census_key, output_dir)
-        plot_ann_elec_sales(output_dir)
-        plot_peak_data(output_dir)
-        plot_utility_costs(eia_df, output_dir)
-        plot_dsm_comprehensive_dashboard(2023, output_dir)
+        # plot_permits_construction(census_key, output_dir)
+        # plot_county_heating_equipment(census_key, output_dir)
+        # plot_ann_elec_sales(output_dir)
+        # plot_peak_data(output_dir)
+        # plot_utility_costs(eia_df, output_dir)
+        # plot_dsm_comprehensive_dashboard(2023, output_dir)
         print(f"\nPipeline complete. Visuals saved to ./{output_dir}")
     except Exception as e:
         print(f"\nPIPELINE HALTED DUE TO ERROR: {e}")

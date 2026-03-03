@@ -14,12 +14,14 @@ import zipfile
 import io
 import json
 from urllib.request import urlopen
-
 import pandas as pd
 import requests
 import plotly.graph_objects as go
-import plotly.io as pio
 from plotly.subplots import make_subplots
+import re
+import matplotlib.pyplot as plt
+import matplotlib.colors as mcolors
+import numpy as np
 
 # Ensure clean data handling
 pd.set_option('future.no_silent_downcasting', True)
@@ -352,13 +354,14 @@ def plot_fuel_price_ratio(eia_key, output_dir):
 
 
 def plot_permits_construction(census_key, output_dir):
-    """Permits and construction cost."""
+    """Permits, construction cost maps, and detailed cost breakdown."""
     print("Plotting: Housing permits and construction costs (Census BPS)...")
+
+    # 1. LOAD GEOJSON
     geojson_url = (
         'https://raw.githubusercontent.com/plotly/datasets/master/'
         'geojson-counties-fips.json'
     )
-
     try:
         with urlopen(geojson_url) as response:
             counties = json.load(response)
@@ -366,9 +369,9 @@ def plot_permits_construction(census_key, output_dir):
         print(f"\n[WARNING] Failed to download county GeoJSON. Error: {e}")
         return
 
+    # 2. LOAD BPS DATA (Map data)
     target_year = 2024
     success_bps = False
-
     while target_year >= 2020:
         year_str = str(target_year)[-2:]
         url_a = f"https://www2.census.gov/econ/bps/County/co{year_str}a.txt"
@@ -399,19 +402,25 @@ def plot_permits_construction(census_key, output_dir):
     df['Value'] = pd.to_numeric(df['Value'], errors='coerce').fillna(0)
     df = df[pd.to_numeric(df['SF'], errors='coerce') < 60]
 
+    # 3. LOAD POPULATION DATA (Map data)
     pop_year = target_year
     success_pop = False
-
     while pop_year >= 2020:
         p_url = f"https://api.census.gov/data/{pop_year}/acs/acs5"
-        p_params = {"get": "B01003_001E", "for": "county:*", "key": census_key}
+        p_params = {
+            "get": "B01003_001E",
+            "for": "county:*",
+            "key": census_key
+        }
         try:
             resp = requests.get(p_url, params=p_params, timeout=15)
             if resp.status_code == 200:
                 p_data = resp.json()
                 df_pop = pd.DataFrame(p_data[1:], columns=p_data[0])
-                df_pop['FIPS'] = df_pop['state'].str.zfill(2) + \
+                df_pop['FIPS'] = (
+                    df_pop['state'].str.zfill(2) +
                     df_pop['county'].str.zfill(3)
+                )
                 df_pop['Population'] = pd.to_numeric(
                     df_pop['B01003_001E'], errors='coerce'
                 )
@@ -430,7 +439,10 @@ def plot_permits_construction(census_key, output_dir):
     }
     df_m['FIPS'] = df_m['FIPS'].replace(ct_crosswalk)
     df_m = df_m.groupby('FIPS', as_index=False).agg({
-        'Name': 'first', 'Units': 'sum', 'Value': 'sum', 'Population': 'sum'
+        'Name': 'first',
+        'Units': 'sum',
+        'Value': 'sum',
+        'Population': 'sum'
     })
 
     df_v = df_m[(df_m['Population'] > 0) & (df_m['Units'] > 0)].copy()
@@ -438,44 +450,212 @@ def plot_permits_construction(census_key, output_dir):
     df_v['Cost'] = df_v['Value'] / df_v['Units']
 
     max_p = df_v['Permits_1k'].quantile(0.95)
-    min_c, max_c = df_v['Cost'].min(), df_v['Cost'].quantile(0.95)
+    min_c = df_v['Cost'].min()
+    max_c = df_v['Cost'].quantile(0.95)
 
-    fig_maps = make_subplots(
-        rows=1, cols=2,
-        specs=[[{'type': 'choropleth'}, {'type': 'choropleth'}]],
-        subplot_titles=("New Housing Permits", "New Housing Construction Cost")
+    # 4. LOAD COST BREAKDOWN DATA (Bar Chart Data)
+    try:
+        df_full = pd.read_csv('input_data/cost_comps_full.csv')
+        df_overhead = pd.read_csv('input_data/cost_comps_overhead.csv')
+    except Exception as e:
+        print(f"\n[WARNING] Could not load cost_comps files. Error: {e}")
+        return
+
+    def get_clean_cost(val):
+        if isinstance(val, str):
+            return float(val.replace('$', '').replace(',', ''))
+        return float(val)
+
+    def get_clean_label(label):
+        label = re.sub(r'^[A-Z]+\.\s*', '', label)
+        label = re.sub(r'^[IVX]+\.\s*', '', label)
+        label = re.sub(r'\s*\(.*\)', '', label)
+        return label.strip()
+
+    row_b = df_overhead.iloc[1]
+    cost_const = get_clean_cost(row_b.iloc[5])
+
+    non_const_indices = [0, 2, 3, 4, 5, 6]
+    cost_non_const = sum([
+        get_clean_cost(df_overhead.iloc[i].iloc[5])
+        for i in non_const_indices
+    ])
+
+    df1 = pd.DataFrame([
+        {'Label': 'Total Construction Costs', 'Cost': cost_const,
+         'Group': 'Const'},
+        {'Label': 'Non-Construction Costs', 'Cost': cost_non_const,
+         'Group': 'Non-Const'}
+    ])
+    df1 = df1.sort_values('Cost', ascending=False)
+
+    const_indices = [0, 6, 9, 15, 20, 25, 37, 43]
+    const_sub = []
+    for i in const_indices:
+        row = df_full.iloc[i]
+        c_val = get_clean_cost(row.iloc[5])
+        c_label = get_clean_label(row.iloc[0])
+        const_sub.append({'Label': c_label, 'Cost': c_val, 'Group': 'Const'})
+
+    non_const_sub = []
+    for i in non_const_indices:
+        row = df_overhead.iloc[i]
+        c_val = get_clean_cost(row.iloc[5])
+        c_label = get_clean_label(row.iloc[0])
+        non_const_sub.append({
+            'Label': c_label, 'Cost': c_val, 'Group': 'Non-Const'
+        })
+
+    df2 = pd.DataFrame(const_sub + non_const_sub)
+    df2_const = df2[df2['Group'] == 'Const'].sort_values(
+        'Cost', ascending=False
+    )
+    df2_non = df2[df2['Group'] == 'Non-Const'].sort_values(
+        'Cost', ascending=False
+    )
+    df2_sorted = pd.concat([df2_const, df2_non])
+
+    total_price = cost_const + cost_non_const
+
+    def add_legend_labels(df_source, total):
+        df_source['Percent'] = df_source['Cost'] / total * 100
+        df_source['LegendLabel'] = df_source.apply(
+            lambda x: (
+                f"{x['Label']} "
+                f"(${x['Cost']/1000:.0f}K - {x['Percent']:.0f}%)"
+            ),
+            axis=1
+        )
+        return df_source
+
+    df1 = add_legend_labels(df1, total_price)
+    df2_sorted = add_legend_labels(df2_sorted, total_price)
+
+    # Use Matplotlib to generate our color ramps
+    cmap_red = plt.get_cmap('Reds')
+    reds = [
+        mcolors.to_hex(cmap_red(x))
+        for x in np.linspace(0.4, 0.9, len(df2_const))
+    ]
+    cmap_blue = plt.get_cmap('Blues')
+    blues = [
+        mcolors.to_hex(cmap_blue(x))
+        for x in np.linspace(0.4, 0.9, len(df2_non))
+    ]
+    df2_sorted['Color'] = reds + blues
+
+    # ==========================================
+    # 5. BUILD DASHBOARD
+    # ==========================================
+    fig = make_subplots(
+        rows=2, cols=2,
+        row_heights=[0.6, 0.4],
+        vertical_spacing=0.08,
+        specs=[
+            [{'type': 'choropleth'}, {'type': 'choropleth'}],
+            [{'type': 'bar', 'colspan': 2}, None]
+        ],
+        subplot_titles=(
+            "New Housing Permits",
+            "New Housing Construction Cost",
+            "Typical New Single Family Home: Sale Price Breakdown<br>"
+        )
     )
 
-    fig_maps.add_trace(
+    # --- MAPS ---
+    fig.add_trace(
         go.Choropleth(
             geojson=counties, locations=df_v['FIPS'],
             z=df_v['Permits_1k'], colorscale="Inferno",
             zmin=0, zmax=max_p, marker_line_width=0,
-            colorbar=dict(title="Permits/1k", x=0.46, len=0.75),
+            colorbar=dict(title="Permits/1k", x=0.46, len=0.35, y=0.8),
             customdata=df_v[['Name', 'Units', 'Population']],
-            hovertemplate="<b>%{customdata[0]}</b><br>1k Rate: %{z:.2f}<extra></extra>"
+            hovertemplate=(
+                "<b>%{customdata[0]}</b><br>"
+                "1k Rate: %{z:.2f}<extra></extra>"
+            )
         ), row=1, col=1
     )
 
-    fig_maps.add_trace(
+    fig.add_trace(
         go.Choropleth(
             geojson=counties, locations=df_v['FIPS'],
             z=df_v['Cost'], colorscale="Inferno",
             zmin=min_c, zmax=max_c, marker_line_width=0,
-            colorbar=dict(title="Avg Cost ($)", x=1.02, len=0.75),
+            colorbar=dict(title="Avg Cost ($)", x=1.02, len=0.35, y=0.8),
             customdata=df_v[['Name', 'Units']],
-            hovertemplate="<b>%{customdata[0]}</b><br>Cost: $%{z:,.0f}<extra></extra>"
+            hovertemplate=(
+                "<b>%{customdata[0]}</b><br>"
+                "Cost: $%{z:,.0f}<extra></extra>"
+            )
         ), row=1, col=2
     )
 
-    fig_maps.update_layout(
+    # --- BAR CHART ---
+    colors1 = {
+        'Total Construction Costs': '#E57373',
+        'Non-Construction Costs': '#64B5F6'
+    }
+
+    # Add High Level Bar
+    for _, row in df1.iterrows():
+        fig.add_trace(go.Bar(
+            x=[row['Cost']], y=['High Level'],
+            name=row['LegendLabel'], orientation='h',
+            marker=dict(color=colors1.get(row['Label'], '#E57373')),
+            legendgroup='High Level',
+            legendgrouptitle_text='High Level Summary',
+            hovertemplate=(
+                f"<b>{row['Label']}</b><br>"
+                f"Cost: ${row['Cost']/1000:.0f}K<br>"
+                f"Share: {row['Percent']:.1f}%<extra></extra>"
+            )
+        ), row=2, col=1)
+
+    # Add Detailed Bar
+    for _, row in df2_sorted.iterrows():
+        fig.add_trace(go.Bar(
+            x=[row['Cost']], y=['Detailed'],
+            name=row['LegendLabel'], orientation='h',
+            marker=dict(color=row['Color']),
+            legendgroup='Detailed Breakdown',
+            legendgrouptitle_text='Detailed Breakdown',
+            hovertemplate=(
+                f"<b>{row['Label']}</b><br>"
+                f"Cost: ${row['Cost']/1000:.0f}K<br>"
+                f"Share: {row['Percent']:.1f}%<extra></extra>"
+            )
+        ), row=2, col=1)
+
+    # --- LAYOUT & STYLING ---
+    fig.update_layout(
+        height=1400,
+        barmode='stack',
         geo=dict(scope='usa', projection_type='albers usa'),
         geo2=dict(scope='usa', projection_type='albers usa'),
-        margin={"r": 0, "t": 60, "l": 0, "b": 0}
+        margin={"r": 20, "t": 60, "l": 20, "b": 100},
+        legend=dict(
+            orientation="h", yanchor="top", y=-0.05,
+            xanchor="center", x=0.5,
+            groupclick="toggleitem"
+        )
     )
+
+    # Force order of categorical y-axis, add HTML spaces instead of tickpad
+    fig.update_yaxes(
+        categoryorder='array',
+        categoryarray=['Detailed', 'High Level'],
+        ticksuffix="&nbsp;&nbsp;&nbsp;&nbsp;",  # Pushes text left using spaces
+        row=2, col=1
+    )
+    fig.update_xaxes(
+        domain=[0.15, 0.85],
+        row=2, col=1
+    )
+
     html_maps_path = f"{output_dir}/permits_construction_costs.html"
-    fig_maps.write_html(html_maps_path)
-    print(f" -> Success! Permits and construction cost HTML saved to {html_maps_path}")
+    fig.write_html(html_maps_path, default_width='95%', default_height='100%')
+    print(f" -> Success! Construction HTML saved to {html_maps_path}")
 
 
 def plot_county_heating_equipment(census_key, output_dir):
@@ -1277,7 +1457,8 @@ def plot_utility_costs(eia_df, output_dir):
 
     fig = make_subplots(
         rows=2, cols=1, vertical_spacing=0.12,
-        subplot_titles=(f"Top 15 Grid O&M ({ly})", "CA 10-Year Trend")
+        subplot_titles=(
+            f"States with Highest Utility O&M Costs ({ly})", "CA 10-Year Utility O&M Cost Trend")
     )
 
     for cat in pillars:
@@ -1650,14 +1831,14 @@ def main():
         os.makedirs(output_dir)
 
     try:
-        # eia_df = generate_eia_mapping_df()
-        plot_energy_burden(output_dir)
-        plot_fuel_price_ratio(eia_key, output_dir)
+        eia_df = generate_eia_mapping_df()
+        # plot_energy_burden(output_dir)
+        # plot_fuel_price_ratio(eia_key, output_dir)
         # plot_permits_construction(census_key, output_dir)
         # plot_county_heating_equipment(census_key, output_dir)
         # plot_ann_elec_sales(output_dir)
         # plot_peak_data(output_dir)
-        # plot_utility_costs(eia_df, output_dir)
+        plot_utility_costs(eia_df, output_dir)
         # plot_dsm_comprehensive_dashboard(2023, output_dir)
         print(f"\nPipeline complete. Visuals saved to ./{output_dir}")
     except Exception as e:

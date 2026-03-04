@@ -10,21 +10,21 @@ Key demand-side snapshots and trends for the US energy sector.
 ### Housing Construction
 This dashboard visualizes the speed and cost of new housing development at the county level, illustrating the regions where new housing is growing the fastest and/or housing construction costs are the lowest.
 
-<iframe src="graphics/permits_construction_costs.html" width="100%" height="800px" frameborder="0"></iframe>
+<iframe src="graphics/permits_construction_costs.html" width="100%" height="1450px" frameborder="0" scrolling="no"></iframe>
 
 ---
 
 ### Fuel Price Comparisons
 The spread between electricity and natural gas prices heavily influences electrification economics. This state-by-state analysis highlights where the pricing structure favors natural gas (lower ratio) versus where electricity is more cost-competitive, broken down by residential and commercial sectors.
 
-<iframe src="graphics/fuel_price_ratio_maps_bar.html" width="100%" height="800px" frameborder="0"></iframe>
+<iframe src="graphics/fuel_price_ratio_maps_bar.html" width="100%" height="1650px" frameborder="0" scrolling="no"></iframe>
 
 ---
 
 ### Household Energy Burden
 Energy burden—the percentage of household income spent on energy bills—is a critical affordability metric. These plots show both the *total* energy burden (across fuels) and the *electric-only* energy burden, illustrating where communities are most vulnerable to price shocks and where electric bills dominate household expenses.
 
-<iframe src="graphics/energy_burden_maps_bar.html" width="100%" height="800px" frameborder="0"></iframe>
+<iframe src="graphics/energy_burden_maps_bar.html" width="100%" height="1650px" frameborder="0" scrolling="no"></iframe>
 
 <hr style="border: 2px solid #333; margin: 30px 0;">
 
@@ -71,4 +71,19 @@ To serve growing electricity demand and manage new technology operation at the g
 
 # Economic Growth and Competitiveness
 
-*(Sub-sections and visualizations for this category will be populated in future updates.)*
+### Buildings Jobs
+Buildings-related jobs – jobs to design, construct, operate, and retrofit buildings – are an important component of overall U.S. employment numbers. This chart shows the trend in buildings-related jobs over the past two decades.
+
+<div align="center">
+  <iframe src="graphics/building_jobs_trend.html" width="80%" height="880px" frameborder="0" scrolling="no"></iframe>
+</div>
+
+<hr style="border: 2px solid #333; margin: 30px 0;">
+
+### GDP from Buildings Activities
+Activities in commercial and residential buildings contribute substantially to U.S. gross domestic product (GDP). This chart shows the wedge of those contributions together with industrial/non-building activities over the past two decades.
+
+<div align="center">
+	<iframe src="graphics/gdp_contributions.html" width="80%" height="800px" frameborder="0"></iframe>
+</div>
+<hr style="border: 2px solid #333; margin: 30px 0;">

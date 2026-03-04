@@ -99,9 +99,12 @@ def plot_energy_burden(output_dir):
             [{'type': 'bar', 'colspan': 2}, None]              # Bottom: Bar
         ],
         subplot_titles=(
-            "Total Energy Burden",
-            "Electric Energy Burden",
-            "Total and Electric Energy Burden by State"
+            ("Total Energy Burden<br>"
+             "<sup>Source: RECS</sup>"),
+            ("Electric Energy Burden<br>"
+             "<sup>Source: RECS</sup>"),
+            ("Total and Electric Energy Burden by State<br>"
+             "<sup>Source: RECS</sup>")
         )
     )
 
@@ -282,9 +285,12 @@ def plot_fuel_price_ratio(eia_key, output_dir):
             [{'type': 'bar', 'colspan': 2}, None]
         ],
         subplot_titles=(
-            f"Residential Customers ({target_year})",
-            f"Commercial Customers ({target_year})",
-            "Electric vs. Gas Price Ratio by State"
+            (f"Residential Customers ({target_year})<br>"
+             "<sup>Source: EIA Surveys</sup>"),
+            (f"Commercial Customers ({target_year})<br>"
+             "<sup>Source: EIA Surveys</sup>"),
+            ("Electric vs. Gas Price Ratio by State<br>"
+             "<sup>Source: EIA Surveys</sup>")
         )
     )
 
@@ -556,9 +562,12 @@ def plot_permits_construction(census_key, output_dir):
             [{'type': 'bar', 'colspan': 2}, None]
         ],
         subplot_titles=(
-            "New Housing Permits",
-            "New Housing Construction Cost",
-            "Typical New Single Family Home: Sale Price Breakdown<br>"
+            ("New Housing Permits<br>"
+             "<sup>Source: Census BPS</sup>"),
+            ("New Housing Construction Cost<br>"
+             "<sup>Source: Census BPS</sup>"),
+            ("Typical New Single Family Home: Sale Price Breakdown<br>"
+             "<sup>Source: NAHB</sup><br>")
         )
     )
 
@@ -751,8 +760,10 @@ def plot_county_heating_equipment(census_key, output_dir):
     fig_maps = make_subplots(
         rows=1, cols=2,
         specs=[[{'type': 'choropleth'}, {'type': 'choropleth'}]],
-        subplot_titles=("Residential Electric Heating Penetration (2024)",
-                        "Electric Shift From Previous Survey (2020 vs. 2024)")
+        subplot_titles=(("Residential Electric Heating Penetration (2024)<br>"
+                         "<sup>Source: Census ACS</sup>"),
+                        ("Electric Shift From Previous Survey (2020 vs. 2024)<br>"
+                         "<sup>Source: Census ACS</sup>"))
     )
 
     # Left Panel: 2024 Baseline Percentage
@@ -1019,8 +1030,10 @@ def plot_ann_elec_sales(output_dir):
         rows=2, cols=1, row_heights=[0.6, 0.4], vertical_spacing=0.1,
         specs=[[{'type': 'scattergeo'}], [{'type': 'bar'}]],
         subplot_titles=(
-            "Annual Electricity Sales by State (2023) and Demand Growth (2018-2023)",
-            "States with Highest Growth in Total Sales (2018-2023), by Sector"
+            ("Annual Electricity Sales by State (2023) and Demand Growth (2018-2023)<br>"
+             "<sup>Source: EIA 861</sup>"),
+            ("States with Highest Growth in Total Sales (2018-2023), by Sector<br>"
+             "<sup>Source: EIA 861</sup>")
         )
     )
 
@@ -1237,9 +1250,12 @@ def plot_peak_data(output_dir):
             [{"type": "bar"}, {"type": "bar"}]
         ],
         subplot_titles=(
-            "Peak Demand Seasonality",
-            "States with Highest Growth in Winter Peak Demand",
-            "States with Highest Growth in Summer Peak Demand"
+            ("Peak Demand Seasonality<br>"
+             "<sup>Source: EIA 861</sup>"),
+            ("States with Highest Growth in Winter Peak Demand<br>"
+             "<sup>Source: EIA 861</sup>"),
+            ("States with Highest Growth in Summer Peak Demand<br>"
+             "<sup>Source: EIA 861</sup>")
         )
     )
 
@@ -1458,7 +1474,10 @@ def plot_utility_costs(eia_df, output_dir):
     fig = make_subplots(
         rows=2, cols=1, vertical_spacing=0.12,
         subplot_titles=(
-            f"States with Highest Utility O&M Costs ({ly})", "CA 10-Year Utility O&M Cost Trend")
+            (f"States with Highest Utility O&M Costs ({ly})<br>"
+             "<sup>Source: FERC Form 1 via PUDL</sup>"),
+            ("CA 10-Year Utility O&M Cost Trend<br>"
+             "<sup>Source: FERC Form 1 via PUDL</sup>"))
     )
 
     for cat in pillars:
@@ -1694,10 +1713,14 @@ def plot_dsm_comprehensive_dashboard(year, output_dir):
             [{"type": "xy"}, {"type": "xy"}]
         ],
         subplot_titles=(
-            "Energy Efficiency Avoided Peak",
-            "Demand Response Avoided Peak (Potential and Actual)",
-            f"States with Highest EE Growth, by Sector ({base_year}-{year})",
-            f"States with Highest DR Potential Growth, by Sector ({base_year}-{year})"
+            ("Energy Efficiency Avoided Peak<br>"
+             "<sup>Source: EIA 861</sup>"),
+            ("Demand Response Avoided Peak (Potential and Actual)<br>"
+             "<sup>Source: EIA 861</sup>"),
+            (f"States with Highest EE Growth, by Sector ({base_year}-{year})<br>"
+             "<sup>Source: EIA 861</sup>"),
+            (f"States with Highest DR Potential Growth, by Sector ({base_year}-{year}<br>"
+             "<sup>Source: EIA 861</sup>")
         )
     )
 
@@ -1812,6 +1835,329 @@ def plot_dsm_comprehensive_dashboard(year, output_dir):
     print(f"-> Success! DSM potential plots saved to {html_path}")
 
 
+def plot_building_jobs_trend(bls_key, output_dir):
+    """Buildings-related jobs trend."""
+    print("Plotting: Buildings jobs (BLS)...")
+
+    # Define the CEU (Unadjusted) Series IDs for all sub-sectors
+    series_map = {
+        'CEU2023822001': 'HVAC & Plumbing Contractors',
+        'CEU2023821001': 'Electrical Contractors',
+        'CEU2023610001': 'Residential Construction',
+        'CEU2023620001': 'Commercial Construction',
+        'CEU2023831001': 'Insulation & Weatherization',
+        'CEU2023816001': 'Roofing Contractors',
+        'CEU2023829001': 'Other Bldg. Equip. Contractors',
+        'CEU6054130001': 'Architecture & Engineering',
+        'CEU6054160001': 'Scientific/Tech Consulting',
+        'CEU6056120001': 'Facilities Support Services',
+        'CEU5553131201': 'Nonres. Property Managers',
+        'CEU3133341501': 'HVAC & Refrigeration Mfg.',
+        'CEU3133510001': 'Lighting Equip. Mfg.',
+        'CEU3133590001': 'Other Elec. Equip. Mfg.'
+    }
+
+    # Assign legend groups for cleaner Plotly toggling
+    group_map = {
+        'HVAC & Plumbing Contractors': 'Equipment Installation',
+        'Electrical Contractors': 'Equipment Installation',
+        'Residential Construction': 'Construction',
+        'Commercial Construction': 'Construction',
+        'Insulation & Weatherization': 'Envelope Component Installation',
+        'Roofing Contractors': 'Envelope Component Installation',
+        'Other Bldg. Equip. Contractors': 'Equipment Installation',
+        'Architecture & Engineering': 'Design and Construction Services',
+        'Scientific/Tech Consulting': 'Design and Construction Services',
+        'Facilities Support Services': 'Operations Services',
+        'Nonres. Property Managers': 'Operations Services',
+        'HVAC & Refrigeration Mfg.': 'Equipment Manufacturing',
+        'Lighting Equip. Mfg.': 'Equipment Manufacturing',
+        'Other Elec. Equip. Mfg.': 'Equipment Manufacturing'
+    }
+
+    # Hardcode distinct colors to avoid repeating defaults
+    colors = [
+        '#1f77b4', '#ff7f0e', '#2ca02c', '#d62728',
+        '#9467bd', '#8c564b', '#e377c2', '#7f7f7f',
+        '#bcbd22', '#17becf', '#393b79', '#5254a3',
+        '#6b6ecf', '#9c9ede'
+    ]
+
+    # We now have exactly 14 valid series, so we use range(14)
+    color_dict = {list(group_map.keys())[i]: colors[i] for i in range(14)}
+
+    headers = {'Content-type': 'application/json'}
+    data = json.dumps({
+        "seriesid": list(series_map.keys()),
+        "startyear": "2005",
+        "endyear": "2024",
+        "registrationkey": bls_key
+    })
+
+    try:
+        url = 'https://api.bls.gov/publicAPI/v2/timeseries/data/'
+        req = requests.post(url, data=data, headers=headers, timeout=30)
+        req.raise_for_status()
+        json_data = req.json()
+    except Exception as e:
+        print(f"\n[WARNING] BLS API fetch failed: {e}")
+        return
+
+    if json_data.get('status') != 'REQUEST_SUCCEEDED':
+        err = json_data.get('message')
+        print(f"\n[WARNING] BLS API Error: {err}")
+        return
+
+    records = []
+    for series in json_data['Results']['series']:
+        series_id = series['seriesID']
+        series_name = series_map.get(series_id, series_id)
+
+        for item in series['data']:
+            year = item['year']
+            period = item['period']
+
+            if period == 'M13':
+                continue
+
+            value = float(item['value'])
+            month = period.replace('M', '')
+            date_str = f"{year}-{month}-01"
+
+            records.append({
+                'Date': date_str,
+                'Job Category': series_name,
+                'Legend Group': group_map.get(series_name, 'Other'),
+                'Employees (Thousands)': value
+            })
+
+    df = pd.DataFrame(records)
+    if df.empty:
+        print(" -> [WARNING] No data parsed from BLS.")
+        return
+
+    df['Date'] = pd.to_datetime(df['Date'])
+    df = df.sort_values(['Job Category', 'Date'])
+
+    # Apply 12-month rolling average to de-seasonalize the unadjusted data
+    df['Smoothed Jobs'] = df.groupby('Job Category')[
+        'Employees (Thousands)'
+    ].transform(lambda x: x.rolling(12, min_periods=1).mean())
+
+    # Filter to 2006+ so the rolling average has time to "warm up"
+    df = df[df['Date'] >= '2006-01-01'].copy()
+
+    # Build the Plotly line chart
+    fig = go.Figure()
+
+    # We loop through the groups first so they appear organized in the legend
+    for grp in df['Legend Group'].unique():
+        df_group = df[df['Legend Group'] == grp]
+        for category in df_group['Job Category'].unique():
+            df_cat = df_group[df_group['Job Category'] == category]
+            fig.add_trace(go.Scatter(
+                x=df_cat['Date'],
+                y=df_cat['Smoothed Jobs'],
+                mode='lines',
+                name=category,
+                line=dict(width=2, color=color_dict.get(category)),
+                legendgroup=grp,
+                legendgrouptitle_text=f"<b>{grp}</b>",
+                hovertemplate=(
+                    f"<b>{category}</b><br>"
+                    "Date: %{x|%b %Y}<br>"
+                    "Jobs: %{y:,.1f}K<extra></extra>"
+                )
+            ))
+
+    fig.update_layout(
+        title=(
+            "Trends in Buildings-related Jobs (2006-2024)<br>"
+            "<sup>Source: BLS; 12-Month Trailing Average</sup>"
+        ),
+        xaxis_title="Year",
+        yaxis_title="Total Employees (Thousands)",
+        template="plotly_white",
+        legend=dict(
+            orientation="v",  # Switched to vertical because of the 5 groups
+            yanchor="top",
+            y=1.0,
+            xanchor="left",
+            x=1.02,           # Placed to the right of the plot
+            groupclick="toggleitem"
+        ),
+        hovermode="x unified",
+        margin=dict(r=250, t=80, l=20, b=40),  # Expanded right margin for legend
+        height=850
+    )
+
+    html_path = f"{output_dir}/building_jobs_trend.html"
+    fig.write_html(html_path, default_width='100%', default_height='100%')
+    print(f" -> Success! Buildings jobs HTML saved to {html_path}")
+
+
+def plot_gdp_by_building_type(bea_key, output_dir):
+    """Trends in buildings activity contribution to GDP."""
+    print("Plotting: Buildings GDP contribution (BEA API)...")
+
+    if not bea_key:
+        print("\n[WARNING] BEA API key is missing. Skipping GDP plot.")
+        return
+
+    # BEA API Parameters for GDP by Industry (Value Added)
+    url = "https://apps.bea.gov/api/data/"
+    params = {
+        "UserID": bea_key,
+        "method": "GetData",
+        "datasetname": "GdpByIndustry",
+        "TableID": "1",        # Table 1: Value Added by Industry
+        "Frequency": "A",      # Annual
+        "Year": "ALL",
+        "Industry": "ALL",
+        "ResultFormat": "JSON"
+    }
+
+    try:
+        req = requests.get(url, params=params, timeout=30)
+        req.raise_for_status()
+        data = req.json()
+    except Exception as e:
+        print(f"\n[WARNING] BEA API fetch failed: {e}")
+        return
+
+    # Robust JSON Parsing for BEA API Quirks
+    results_node = data.get('BEAAPI', {}).get('Results', {})
+
+    # Check if the API returned an explicit error message
+    if isinstance(results_node, dict) and 'Error' in results_node:
+        err_msg = results_node['Error'].get('ErrorDetail', results_node['Error'])
+        print(f"\n[WARNING] BEA API Error: {err_msg}")
+        return
+
+    try:
+        # GdpByIndustry sometimes wraps Results in a list
+        if isinstance(results_node, list):
+            results = results_node[0]['Data']
+        else:
+            results = results_node['Data']
+
+        df = pd.DataFrame(results)
+    except (KeyError, IndexError, TypeError) as e:
+        print(f"\n[WARNING] Unexpected BEA API response structure: {e}")
+        return
+
+    if df.empty:
+        print("\n[WARNING] No data returned from BEA API.")
+        return
+
+    # Convert values and filter for the last 20 years
+    df['DataValue'] = pd.to_numeric(df['DataValue'], errors='coerce')
+    df['Year'] = pd.to_numeric(df['Year'], errors='coerce')
+    current_year = 2023  # Using 2023 as the latest fully revised annual year
+    df = df[(df['Year'] >= (current_year - 20)) & (df['Year'] <= current_year)]
+
+    # Map mutually exclusive NAICS equivalents to our 3 building types
+    mapping = {
+        # --- RESIDENTIAL ---
+        '53': 'Residential (Real Estate & Housing)',
+        # --- COMMERCIAL (Service Economy) ---
+        '44RT': 'Commercial (Offices, Retail, Services)',  # Retail Tradef
+        '51': 'Commercial (Offices, Retail, Services)',    # Information
+        '52': 'Commercial (Offices, Retail, Services)',    # Finance & Insurance
+        '54': 'Commercial (Offices, Retail, Services)',    # Professional
+        '55': 'Commercial (Offices, Retail, Services)',    # Management
+        '56': 'Commercial (Offices, Retail, Services)',    # Admin/Waste
+        '61': 'Commercial (Offices, Retail, Services)',    # Education
+        '62': 'Commercial (Offices, Retail, Services)',    # Healthcare
+        '71': 'Commercial (Offices, Retail, Services)',    # Arts/Entertainment
+        '72': 'Commercial (Offices, Retail, Services)',    # Accommodation/Food
+        '81': 'Commercial (Offices, Retail, Services)',    # Other Services
+        'G': 'Commercial (Offices, Retail, Services)',     # Government
+        # --- INDUSTRIAL / Other ---
+        '11': 'Industrial / Other',                      # Agriculture
+        '21': 'Industrial / Other',                      # Mining
+        '22': 'Industrial / Other',                      # Utilities
+        '23': 'Industrial / Other',                      # Construction
+        '31G': 'Industrial / Other',                     # Manufacturing
+        '42': 'Industrial / Other',                      # Wholesale Trade
+        '48TW': 'Industrial / Other'                     # Transport/Warehouse
+    }
+
+    df_filtered = df[df['Industry'].isin(mapping.keys())].copy()
+    df_filtered['Category'] = df_filtered['Industry'].map(mapping)
+
+    # Aggregate by Year and Category
+    df_agg = df_filtered.groupby(['Year', 'Category'])['DataValue'].sum()
+    df_agg = df_agg.reset_index()
+
+    # Calculate Total GDP per year for percentage hovers
+    total_gdp = df_agg.groupby('Year')['DataValue'].sum().reset_index()
+    total_gdp.rename(columns={'DataValue': 'Total_GDP'}, inplace=True)
+    df_agg = pd.merge(df_agg, total_gdp, on='Year')
+    df_agg['Share'] = (df_agg['DataValue'] / df_agg['Total_GDP']) * 100
+
+    # Sort categories to stack beautifully (Industrial bottom, then Res, then Com)
+    cat_order = [
+        'Industrial / Other',
+        'Residential (Real Estate & Housing)',
+        'Commercial (Offices, Retail, Services)'
+    ]
+
+    # Build the Plotly Wedge Plot (Stacked Area Chart)
+    fig = go.Figure()
+    colors = {
+        'Commercial (Offices, Retail, Services)': '#1f77b4',  # Blue
+        'Residential (Real Estate & Housing)': '#ff7f0e',     # Orange
+        'Industrial / Other': '#7f7f7f'                     # Gray
+    }
+
+    for cat in cat_order:
+        df_plot = df_agg[df_agg['Category'] == cat].sort_values('Year')
+        fig.add_trace(go.Scatter(
+            x=df_plot['Year'],
+            y=df_plot['DataValue'],
+            name=cat,
+            mode='lines',
+            line=dict(width=0.5, color=colors[cat]),
+            stackgroup='one',  # This creates the stacked wedge effect
+            fillcolor=colors[cat],
+            hovertemplate=(
+                f"<b>{cat}</b><br>"
+                "Year: %{x}<br>"
+                "Value Added: $%{y:,.0f} Billion<br>"
+                "Share of GDP: %{customdata[0]:.1f}%<extra></extra>"
+            ),
+            customdata=df_plot[['Share']]
+        ))
+
+    fig.update_layout(
+        title=(
+            "GDP Contributions of Activities in Residential and Commercial Buildings<br>"
+            "<sup>Source: BEA</sup>"
+        ),
+        xaxis_title="Year",
+        yaxis_title="GDP Contribution ($ Billions)",
+        template="plotly_white",
+        hovermode="x unified",
+        legend=dict(
+            orientation="h",
+            yanchor="top",
+            y=-0.15,
+            xanchor="center",
+            x=0.5
+        ),
+        margin=dict(r=40, t=80, l=40, b=80),
+        height=700
+    )
+
+    # Force x-axis to show integer years nicely
+    fig.update_xaxes(dtick=2)
+
+    html_path = f"{output_dir}/gdp_contributions.html"
+    fig.write_html(html_path, default_width='100%', default_height='100%')
+    print(f" -> Success! GDP wedge HTML saved to {html_path}")
+
+
 # ==========================================
 # 3. MAIN ORCHESTRATOR
 # ==========================================
@@ -1822,9 +2168,30 @@ def main():
     print("  INITIALIZING PLOTTING PIPELINE")
     print("=====================================================\n")
 
-    # Insert API keys here
-    eia_key = "NjO1ewWurttMKVirMLj7fwBo5kEmttqe1o2XW1MH"
-    census_key = "81d2e4410a8fad6186e95a52d6ffc17413cf5bef"
+    bls_key = None  # Insert your API key here
+    eia_key = None  # Insert your API key here
+    bea_key = None  # Insert your API key here
+    census_key = None  # Insert your API key here
+    # ita_key = None  # Insert your API key here
+
+    missing_keys = []
+    if not bls_key:
+        missing_keys.append("BLS_API_KEY")
+    if not eia_key:
+        missing_keys.append("EIA_API_KEY")
+    if not bea_key:
+        missing_keys.append("BEA_API_KEY")
+    if not census_key:
+        missing_keys.append("CENSUS_API_KEY")
+    # if not ita_key:
+    #     missing_keys.append("ITA_API_KEY")
+
+    if missing_keys:
+        print("CRITICAL ERROR: The following API keys are missing:")
+        for key in missing_keys:
+            print(f" - {key}")
+        print("Please add them before running this script.")
+        return
 
     output_dir = "graphics"
     if not os.path.exists(output_dir):
@@ -1832,14 +2199,16 @@ def main():
 
     try:
         eia_df = generate_eia_mapping_df()
-        # plot_energy_burden(output_dir)
-        # plot_fuel_price_ratio(eia_key, output_dir)
-        # plot_permits_construction(census_key, output_dir)
-        # plot_county_heating_equipment(census_key, output_dir)
-        # plot_ann_elec_sales(output_dir)
-        # plot_peak_data(output_dir)
+        plot_energy_burden(output_dir)
+        plot_fuel_price_ratio(eia_key, output_dir)
+        plot_permits_construction(census_key, output_dir)
+        plot_county_heating_equipment(census_key, output_dir)
+        plot_ann_elec_sales(output_dir)
+        plot_peak_data(output_dir)
         plot_utility_costs(eia_df, output_dir)
-        # plot_dsm_comprehensive_dashboard(2023, output_dir)
+        plot_dsm_comprehensive_dashboard(2023, output_dir)
+        plot_building_jobs_trend(bls_key, output_dir)
+        plot_gdp_by_building_type(bea_key, output_dir)
         print(f"\nPipeline complete. Visuals saved to ./{output_dir}")
     except Exception as e:
         print(f"\nPIPELINE HALTED DUE TO ERROR: {e}")

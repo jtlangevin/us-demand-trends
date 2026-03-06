@@ -13,7 +13,7 @@ import os
 import zipfile
 import io
 import json
-from urllib.request import urlopen
+from urllib.request import urlopen, Request
 import pandas as pd
 import requests
 import plotly.graph_objects as go
@@ -22,6 +22,13 @@ import re
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 import numpy as np
+import geopandas as gpd
+import warnings
+from shapely.errors import ShapelyDeprecationWarning
+
+# Suppress geometry warnings for cleaner output
+warnings.filterwarnings("ignore", category=ShapelyDeprecationWarning)
+warnings.filterwarnings("ignore", message=".*Geometry is in a geographic CRS.*")
 
 # Ensure clean data handling
 pd.set_option('future.no_silent_downcasting', True)
@@ -94,6 +101,7 @@ def plot_energy_burden(output_dir):
         rows=2, cols=2,
         row_heights=[0.3, 0.7],
         vertical_spacing=0.15,  # Increased to create more gap below maps
+        horizontal_spacing=0.05,  # <-- This pulls the maps right next to each other
         specs=[
             [{'type': 'choropleth'}, {'type': 'choropleth'}],  # Top: Maps
             [{'type': 'bar', 'colspan': 2}, None]              # Bottom: Bar
@@ -280,6 +288,7 @@ def plot_fuel_price_ratio(eia_key, output_dir):
         rows=2, cols=2,
         row_heights=[0.3, 0.7],
         vertical_spacing=0.15,  # Increased to create more gap below maps
+        horizontal_spacing=0.05,  # <-- This pulls the maps right next to each other
         specs=[
             [{'type': 'choropleth'}, {'type': 'choropleth'}],
             [{'type': 'bar', 'colspan': 2}, None]
@@ -557,6 +566,7 @@ def plot_permits_construction(census_key, output_dir):
         rows=2, cols=2,
         row_heights=[0.6, 0.4],
         vertical_spacing=0.08,
+        horizontal_spacing=0.05,  # <-- This pulls the maps right next to each other
         specs=[
             [{'type': 'choropleth'}, {'type': 'choropleth'}],
             [{'type': 'bar', 'colspan': 2}, None]
@@ -759,6 +769,7 @@ def plot_county_heating_equipment(census_key, output_dir):
     # 5. Build the Side-by-Side Choropleth Maps
     fig_maps = make_subplots(
         rows=1, cols=2,
+        horizontal_spacing=0.05,  # <-- This pulls the maps right next to each other
         specs=[[{'type': 'choropleth'}, {'type': 'choropleth'}]],
         subplot_titles=(("Residential Electric Heating Penetration (2024)<br>"
                          "<sup>Source: Census ACS</sup>"),
@@ -1029,6 +1040,7 @@ def plot_ann_elec_sales(output_dir):
     fig = make_subplots(
         rows=2, cols=1, row_heights=[0.6, 0.4], vertical_spacing=0.1,
         specs=[[{'type': 'scattergeo'}], [{'type': 'bar'}]],
+        horizontal_spacing=0.05,  # <-- This pulls the maps right next to each other
         subplot_titles=(
             ("Annual Electricity Sales by State (2023) and Demand Growth (2018-2023)<br>"
              "<sup>Source: EIA 861</sup>"),
@@ -1244,7 +1256,7 @@ def plot_peak_data(output_dir):
         rows=2, cols=2,
         row_heights=[0.6, 0.4],
         vertical_spacing=0.12,
-        horizontal_spacing=0.1,
+        horizontal_spacing=0.05,  # <-- This pulls the maps right next to each other
         specs=[
             [{"type": "scattergeo", "colspan": 2}, None],
             [{"type": "bar"}, {"type": "bar"}]
@@ -1473,6 +1485,7 @@ def plot_utility_costs(eia_df, output_dir):
 
     fig = make_subplots(
         rows=2, cols=1, vertical_spacing=0.12,
+        horizontal_spacing=0.05,  # <-- This pulls the maps right next to each other
         subplot_titles=(
             (f"States with Highest Utility O&M Costs ({ly})<br>"
              "<sup>Source: FERC Form 1 via PUDL</sup>"),
@@ -1708,6 +1721,7 @@ def plot_dsm_comprehensive_dashboard(year, output_dir):
     fig = make_subplots(
         rows=2, cols=2,
         row_heights=[0.6, 0.4], vertical_spacing=0.1,
+        horizontal_spacing=0.05,  # <-- This pulls the maps right next to each other
         specs=[
             [{"type": "geo"}, {"type": "geo"}],
             [{"type": "xy"}, {"type": "xy"}]
@@ -2158,6 +2172,257 @@ def plot_gdp_by_building_type(bea_key, output_dir):
     print(f" -> Success! GDP wedge HTML saved to {html_path}")
 
 
+def plot_ferc_load_growth_forecasts(output_dir):
+    """Maps FERC 714 load growth, explicitly separating RTOs from Retail Utilities."""
+    print("Plotting: FERC load growth forecasts...")
+
+    # ==========================================
+    # 1. LOAD GEOJSON FOR CENTROIDS
+    # ==========================================
+    geojson_url = \
+        'https://raw.githubusercontent.com/plotly/datasets/master/geojson-counties-fips.json'
+    try:
+        req = Request(geojson_url, headers={'User-Agent': 'Mozilla/5.0'})
+        with urlopen(req) as response:
+            counties = json.load(response)
+
+        county_fips_list = [feature['id'] for feature in counties['features']]
+        df_all_counties = pd.DataFrame({'FIPS': county_fips_list})
+        df_all_counties['state_fips'] = df_all_counties['FIPS'].str[:2]
+
+        county_gdf = gpd.read_file(geojson_url)
+        county_gdf['lon'] = county_gdf.to_crs(epsg=3857).centroid.to_crs(epsg=4326).x
+        county_gdf['lat'] = county_gdf.to_crs(epsg=3857).centroid.to_crs(epsg=4326).y
+        county_coords = county_gdf[['id', 'lon', 'lat']].rename(columns={'id': 'FIPS'})
+    except Exception as e:
+        print(f"\n[ERROR] Failed to download county GeoJSON: {e}")
+        return
+
+    # ==========================================
+    # 2. FETCH PUDL DATA
+    # ==========================================
+    base_url = "https://s3.us-west-2.amazonaws.com/pudl.catalyst.coop/eel-hole"
+    try:
+        print(" -> Fetching PUDL Datasets...")
+        df_crosswalk = pd.read_parquet(f"{base_url}/core_ferc714__respondent_id.parquet")
+        df_ferc_all = pd.read_parquet(
+            f"{base_url}/core_ferc714__yearly_planning_area_demand_forecast.parquet")
+
+        df_terr_all = pd.read_parquet(f"{base_url}/core_eia861__yearly_service_territory.parquet")
+        terr_date_col = 'report_year' if 'report_year' in df_terr_all.columns else 'report_date'
+        df_terr = df_terr_all[df_terr_all[terr_date_col] == df_terr_all[terr_date_col].max()].copy()
+    except Exception as e:
+        print(f"\n[ERROR] PUDL fetch failed: {e}")
+        return
+
+    # ==========================================
+    # 3. METRICS (NEAREST NEIGHBOR GROUPING FIX)
+    # ==========================================
+    date_col = 'report_year' if 'report_year' in df_ferc_all.columns else 'report_date'
+    df_ferc_all['report_year_clean'] = (
+        pd.to_datetime(df_ferc_all[date_col]).dt.year if
+        date_col == 'report_date' else df_ferc_all[date_col])
+
+    latest_year = df_ferc_all['report_year_clean'].max()
+    df_latest = df_ferc_all[df_ferc_all['report_year_clean'] == latest_year].copy()
+    df_latest['years_out'] = df_latest['forecast_year'] - df_latest['report_year_clean']
+
+    # Max of Summer vs Winter Peak
+    df_latest['peak_mw'] = df_latest[
+        ['summer_peak_demand_forecast_mw', 'winter_peak_demand_forecast_mw']].max(axis=1)
+
+    # Clean missing peaks before math
+    df_latest = df_latest.dropna(subset=['peak_mw'])
+
+    # 3A. Get Baseline (The earliest year reported by each utility)
+    df_latest = df_latest.sort_values(['respondent_id_ferc714', 'years_out'])
+    df_baseline = df_latest.groupby('respondent_id_ferc714').first().reset_index()
+    df_baseline = df_baseline[
+        ['respondent_id_ferc714', 'peak_mw']].rename(columns={'peak_mw': 'baseline_mw'})
+
+    # 3B. Get 5-Year Peak (Find the year closest to 5 for each utility)
+    df_latest['dist_5'] = (df_latest['years_out'] - 5).abs()
+    df_5yr = df_latest.sort_values(
+        ['respondent_id_ferc714', 'dist_5']).groupby('respondent_id_ferc714').first().reset_index()
+    df_5yr = df_5yr[['respondent_id_ferc714', 'peak_mw']].rename(columns={'peak_mw': 'peak_5yr'})
+
+    # 3C. Get 10-Year Peak (Find the year closest to 10 for each utility)
+    df_latest['dist_10'] = (df_latest['years_out'] - 10).abs()
+    df_10yr = df_latest.sort_values(
+        ['respondent_id_ferc714', 'dist_10']).groupby('respondent_id_ferc714').first().reset_index()
+    df_10yr = df_10yr[['respondent_id_ferc714', 'peak_mw']].rename(columns={'peak_mw': 'peak_10yr'})
+
+    # Merge them safely
+    df_growth = df_baseline.merge(df_5yr, on='respondent_id_ferc714', how='left')
+    df_growth = df_growth.merge(df_10yr, on='respondent_id_ferc714', how='left')
+
+    # Calculate Deltas & Percentages safely
+    df_growth['delta_5yr'] = (df_growth['peak_5yr'] - df_growth['baseline_mw']).fillna(0)
+    df_growth['pct_5yr'] = np.where(
+        df_growth['baseline_mw'] > 0, (df_growth['delta_5yr'] / df_growth['baseline_mw']) * 100, 0)
+
+    df_growth['delta_10yr'] = (df_growth['peak_10yr'] - df_growth['baseline_mw']).fillna(0)
+    df_growth['pct_10yr'] = np.where(
+        df_growth['baseline_mw'] > 0, (df_growth['delta_10yr'] / df_growth['baseline_mw']) * 100, 0)
+
+    # Establish minimum visual bubble sizes
+    df_growth['bubble_5yr'] = df_growth['delta_5yr'].fillna(0).clip(lower=10)
+    df_growth['bubble_10yr'] = df_growth['delta_10yr'].fillna(0).clip(lower=10)
+
+    # ==========================================
+    # 4. SPATIAL ANCHORING & CATEGORIZATION
+    # ==========================================
+    df_terr['FIPS'] = df_terr['state_id_fips'].astype(str).str.zfill(2) + \
+        df_terr['county_id_fips'].astype(str).str.zfill(3).str[-3:]
+
+    eia_col = 'eia_code' if 'eia_code' in df_crosswalk.columns else 'utility_id_eia'
+    df_cw_exp = df_crosswalk.dropna(subset=[eia_col]).copy()
+    df_cw_exp[eia_col] = df_cw_exp[eia_col].astype(str).str.replace(r'\[|\]', '', regex=True)
+    df_cw_exp = df_cw_exp.assign(**{eia_col: df_cw_exp[eia_col].str.split(',')}).explode(eia_col)
+
+    df_cw_exp['join_id'] = pd.to_numeric(
+        df_cw_exp[eia_col], errors='coerce').fillna(-1).astype(int)
+    df_terr['join_id'] = pd.to_numeric(
+        df_terr['utility_id_eia'], errors='coerce').fillna(-2).astype(int)
+
+    df_retail = pd.merge(
+        df_cw_exp[['respondent_id_ferc714', 'join_id']],
+        df_terr[['join_id', 'FIPS']], on='join_id')[['respondent_id_ferc714', 'FIPS']]
+
+    rto_states = {
+        'PJM': ['42', '34', '24', '10', '39', '51', '54', '11', '17', '18', '26', '21', '37', '47'],
+        'Midcontinent|MISO': ['27', '55', '19', '17', '18', '26', '29', '05',
+                              '22', '28', '38', '46', '30', '48'],
+        'Southwest Power|SPP': [
+            '20', '40', '31', '38', '46', '48', '35', '29', '05', '22', '30', '56'],
+        'California Independent|CAISO': ['06'],
+        'New York Independent|NYISO': ['36'],
+        'ISO New England|ISONE': ['09', '23', '25', '33', '44', '50'],
+        'Electric Reliability Council of Texas|ERCOT': ['48']
+    }
+
+    rto_rows = []
+    rto_ids = []
+    for name_key, state_list in rto_states.items():
+        match = df_crosswalk[df_crosswalk['respondent_name_ferc714'].str.contains(
+            name_key, case=False, regex=True, na=False)]
+        if not match.empty:
+            for rto_id in match['respondent_id_ferc714'].unique():
+                rto_ids.append(rto_id)
+                for fips in df_all_counties[
+                        df_all_counties['state_fips'].isin(state_list)]['FIPS'].tolist():
+                    rto_rows.append({'respondent_id_ferc714': rto_id, 'FIPS': fips})
+
+    df_master = pd.concat([df_retail, pd.DataFrame(rto_rows)]).drop_duplicates()
+
+    df_spatial_coords = pd.merge(df_master, county_coords, on='FIPS')
+    ba_centroids = df_spatial_coords.groupby(
+        'respondent_id_ferc714')[['lon', 'lat']].mean().reset_index()
+
+    df_map = pd.merge(df_growth, ba_centroids, on='respondent_id_ferc714')
+    df_map = pd.merge(df_map, df_crosswalk[[
+        'respondent_id_ferc714', 'respondent_name_ferc714']], on='respondent_id_ferc714')
+
+    df_map['Entity_Type'] = np.where(df_map['respondent_id_ferc714'].isin(rto_ids),
+                                     'Wholesale RTO/ISO', 'Retail/Vertically Integrated')
+
+    df_map = df_map.dropna(subset=['lon', 'lat', 'bubble_5yr', 'bubble_10yr'])
+    df_map = df_map[df_map['baseline_mw'] > 0].copy()
+
+    # ==========================================
+    # 5. BUILD THE DASHBOARD
+    # ==========================================
+    max_delta = max(df_map['bubble_10yr'].max(), df_map['bubble_5yr'].max())
+    sizeref = 2.0 * max_delta / (45 ** 2) if max_delta > 0 else 1
+
+    fig = make_subplots(
+        rows=1, cols=2,
+        specs=[[{'type': 'scattergeo'}, {'type': 'scattergeo'}]],
+        subplot_titles=(
+            ("5-Year Projection<br>"
+             "<sup>Source: FERC Form 714 via PUDL</sup>"),
+            ("10-Year Projection<br>"
+             "<sup>Source: FERC Form 714 via PUDL</sup>")),
+        horizontal_spacing=0  # <-- This pulls the maps right next to each other
+    )
+
+    cmax_val = df_map['pct_10yr'].quantile(0.95)
+
+    for ent_type in ['Retail/Vertically Integrated', 'Wholesale RTO/ISO']:
+        df_sub = df_map[df_map['Entity_Type'] == ent_type]
+
+        # UX Fix: Use Shape instead of Border Thickness
+        # Give everything a thin black border for visibility
+        marker_symbol = 'diamond' if ent_type == 'Wholesale RTO/ISO' else 'circle'
+        marker_line_width = 0.5
+        marker_line_color = 'black'
+
+        for col_num, (size_col, delta_col, pct_col) in enumerate([
+            ('bubble_5yr', 'delta_5yr', 'pct_5yr'),
+                ('bubble_10yr', 'delta_10yr', 'pct_10yr')], 1):
+            show_colorbar = (col_num == 2 and ent_type == 'Retail/Vertically Integrated')
+
+            fig.add_trace(
+                go.Scattergeo(
+                    lon=df_sub['lon'], lat=df_sub['lat'],
+                    text=df_sub['respondent_name_ferc714'],
+                    marker=dict(
+                        symbol=marker_symbol,
+                        size=df_sub[size_col],
+                        sizemode='area',
+                        sizeref=sizeref,
+                        sizemin=4,
+                        color=df_sub[pct_col],
+                        colorscale='YlOrRd',
+                        cmin=0,
+                        cmax=cmax_val,
+                        showscale=show_colorbar,
+                        colorbar=dict(title="Growth (%)", x=1.02) if show_colorbar else None,
+                        line_color=marker_line_color,
+                        line_width=marker_line_width,
+                        opacity=0.85
+                    ),
+                    customdata=df_sub[[
+                        'respondent_name_ferc714', 'Entity_Type',
+                        'baseline_mw', delta_col, pct_col]],
+                    hovertemplate=(
+                        "<b>%{customdata[0]}</b> (%{customdata[1]})<br>" +
+                        "Current Baseline: %{customdata[2]:,.0f} MW<br>" +
+                        "Projected Growth: <b>+%{customdata[3]:,.0f} MW</b><br>" +
+                        "Growth Rate: <b>%{customdata[4]:.1f}%</b><extra></extra>"
+                    ),
+                    name=ent_type,
+                    legendgroup=ent_type,
+                    showlegend=(col_num == 1)
+                ),
+                row=1, col=col_num
+            )
+
+    fig.update_layout(
+        title_x=0.5,
+        geo=dict(scope='usa', projection_type='albers usa',
+                 showland=True, landcolor="rgb(235, 240, 240)"),
+        geo2=dict(scope='usa', projection_type='albers usa',
+                  showland=True, landcolor="rgb(235, 240, 240)"),
+        height=700,
+        margin={"r": 0, "t": 80, "l": 0, "b": 80},
+        legend=dict(
+            orientation="h",
+            yanchor="top",
+            y=-0.05,
+            xanchor="center",
+            x=0.5,
+            itemsizing="constant"
+        )
+    )
+
+    html_path = f"{output_dir}/load_forecasts.html"
+    fig.write_html(html_path, default_width='100%', default_height='100%')
+    print(f" -> Success! Load forecast HTML maps {len(df_map)} total Planning Areas.")
+
+    # return df_map
+
+
 # ==========================================
 # 3. MAIN ORCHESTRATOR
 # ==========================================
@@ -2168,11 +2433,11 @@ def main():
     print("  INITIALIZING PLOTTING PIPELINE")
     print("=====================================================\n")
 
-    bls_key = None  # Insert your API key here
-    eia_key = None  # Insert your API key here
-    bea_key = None  # Insert your API key here
-    census_key = None  # Insert your API key here
-    # ita_key = None  # Insert your API key here
+    bls_key = "316a16dbca6c4d8296b5d14a5ed8126d"  # Insert your API key here
+    eia_key = "NjO1ewWurttMKVirMLj7fwBo5kEmttqe1o2XW1MH"  # Insert your API key here
+    bea_key = "483D023F-CE3C-4AAC-9C4A-738E31F03EA4"  # Insert your API key here
+    ita_key = "xS2pttp2AE3s!b!"  # Insert your API key here
+    census_key = "81d2e4410a8fad6186e95a52d6ffc17413cf5bef"  # Insert your API key here
 
     missing_keys = []
     if not bls_key:
@@ -2209,6 +2474,7 @@ def main():
         plot_dsm_comprehensive_dashboard(2023, output_dir)
         plot_building_jobs_trend(bls_key, output_dir)
         plot_gdp_by_building_type(bea_key, output_dir)
+        plot_ferc_load_growth_forecasts(output_dir)
         print(f"\nPipeline complete. Visuals saved to ./{output_dir}")
     except Exception as e:
         print(f"\nPIPELINE HALTED DUE TO ERROR: {e}")

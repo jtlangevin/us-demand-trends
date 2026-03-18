@@ -27,6 +27,7 @@ import geopandas as gpd
 import warnings
 import traceback
 from shapely.errors import ShapelyDeprecationWarning
+from dotenv import load_dotenv
 
 # Suppress geometry warnings for cleaner output
 warnings.filterwarnings("ignore", category=ShapelyDeprecationWarning)
@@ -2957,30 +2958,19 @@ def main():
     print("  INITIALIZING PLOTTING PIPELINE")
     print("=====================================================\n")
 
-    bls_key = None  # Insert your API key here
-    eia_key = None  # Insert your API key here
-    bea_key = None  # Insert your API key here
-    # ita_key = None  # Insert your API key here
-    census_key = None  # Insert your API key here
+    # This looks for a .env file and loads it into your local environment.
+    # If it doesn't find one (like when running on GitHub Actions), it just silently skips it!
+    load_dotenv()
 
-    missing_keys = []
-    if not bls_key:
-        missing_keys.append("BLS_API_KEY")
-    if not eia_key:
-        missing_keys.append("EIA_API_KEY")
-    if not bea_key:
-        missing_keys.append("BEA_API_KEY")
-    if not census_key:
-        missing_keys.append("CENSUS_API_KEY")
-    # if not ita_key:
-    #     missing_keys.append("ITA_API_KEY")
+    # Securely fetch API keys from the environment variables
+    bls_key = os.environ.get('BLS_API_KEY')
+    eia_key = os.environ.get('EIA_API_KEY')
+    bea_key = os.environ.get('BEA_API_KEY')
+    ita_key = os.environ.get('ITA_API_KEY')
+    census_key = os.environ.get('CENSUS_API_KEY')
 
-    if missing_keys:
-        print("CRITICAL ERROR: The following API keys are missing:")
-        for key in missing_keys:
-            print(f" - {key}")
-        print("Please add them before running this script.")
-        return
+    if not all([bls_key, eia_key, bea_key, ita_key, census_key]):
+        print("\n[WARNING] One or more API keys are missing from the environment.")
 
     output_dir = "graphics"
     if not os.path.exists(output_dir):

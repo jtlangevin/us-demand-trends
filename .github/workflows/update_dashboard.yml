@@ -1,0 +1,49 @@
+name: Quarterly Energy Data Update
+
+on:
+  schedule:
+    # Runs Jan 1st, Apr 1st, Jul 1st, Oct 1st
+    - cron: '0 0 1 1,4,7,10 *'
+  workflow_dispatch: # Allows you to manually trigger a run with a button click
+
+permissions:
+  contents: write # Grants the bot permission to push commits to your repo
+
+jobs:
+  update-dashboards:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+
+      - name: 🐍 Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12' # Matches the py312 conda environment you built it with
+
+      - name: 📦 Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: 🚀 Run Data Pipeline
+        env:
+          BLS_API_KEY: ${{ secrets.BLS_API_KEY }}
+          EIA_API_KEY: ${{ secrets.EIA_API_KEY }}
+          BEA_API_KEY: ${{ secrets.BEA_API_KEY }}
+          ITA_API_KEY: ${{ secrets.ITA_API_KEY }}
+          CENSUS_API_KEY: ${{ secrets.CENSUS_API_KEY }}
+        run: |
+          python scripts/master.py
+
+      - name: 💾 Commit and Push Updates
+        run: |
+          git config --global user.name 'github-actions[bot]'
+          git config --global user.email 'github-actions[bot]@users.noreply.github.com'
+          
+          # Stage the updated graphics
+          git add graphics/
+          
+          # Check if any files actually changed. If yes, commit and push.
+          git diff --quiet && git diff --staged --quiet || (git commit -m "Automated data update: Monthly dashboards" && git push)

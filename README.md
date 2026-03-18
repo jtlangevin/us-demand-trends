@@ -14,10 +14,17 @@ This dashboard visualizes the speed and cost of new housing development at the c
 
 ---
 
+### Homeowners Insurance Premiums
+Property insurance is a key component of overall homeownership costs. This dashboard maps the median annual cost of homeowners insurance at the county level across the U.S. for all homeowners, providing a highly localized view of where insurance rates are compounding regional housing affordability challenges.
+
+<iframe src="graphics/insurance_costs.html" width="100%" height="750px" frameborder="0"></iframe>
+
+---
+
 ### Household Energy Burden
 Energy burden—the percentage of household income spent on energy bills—is a critical affordability metric. These plots show both the *total* energy burden (across fuels) and the *electric-only* energy burden, illustrating where communities are most vulnerable to price shocks and where electric bills dominate household expenses.
 
-<iframe src="graphics/energy_burden_maps_bar.html" width="100%" height="1650px" frameborder="0" scrolling="no"></iframe>
+<iframe src="graphics/energy_burden_maps_bar.html" width="80%" height="1650px" frameborder="0" scrolling="no"></iframe>
 
 <hr style="border: 2px solid #333; margin: 30px 0;">
 

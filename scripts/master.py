@@ -18,6 +18,7 @@ import pandas as pd
 import requests
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
+import plotly.express as px
 import re
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
@@ -2423,6 +2424,138 @@ def plot_ferc_load_growth_forecasts(output_dir):
     # return df_map
 
 
+def plot_insurance_costs(output_dir):
+    """
+    Fetches 2023 ACS 5-Year estimates and calculates the interpolated median
+    home insurance cost, mapping it to official, up-to-date Census boundaries.
+    """
+    print("Plotting: Homeowner insurance costs (ACS 2023)...")
+
+    # ==========================================
+    # 1. LOAD OFFICIAL CENSUS BOUNDARIES (Fixes CT)
+    # ==========================================
+    # Using the official 2022/2023 Census Cartographic Boundary file (20m resolution is fast)
+    census_shp_url = "https://www2.census.gov/geo/tiger/GENZ2022/shp/cb_2022_us_county_20m.zip"
+    try:
+        print(" -> Fetching official Census County Boundaries (includes new CT regions)...")
+        gdf = gpd.read_file(census_shp_url)
+        # Convert the GeoDataFrame directly to a GeoJSON dictionary for Plotly
+        counties = json.loads(gdf.to_json())
+    except Exception as e:
+        print(f"\n[ERROR] Failed to download official Census boundaries: {e}")
+        return
+
+    # ==========================================
+    # 2. FETCH ACS DATA
+    # ==========================================
+    bucket_suffixes = [
+        ('003', '016'), ('004', '017'), ('005', '018'), ('006', '019'),
+        ('007', '020'), ('008', '021'), ('009', '022'), ('010', '023'),
+        ('011', '024'), ('012', '025'), ('013', '026'), ('014', '027')
+    ]
+
+    variables = ['NAME', 'B25141_001E']
+    for m_suffix, nm_suffix in bucket_suffixes:
+        variables.extend([f'B25141_{m_suffix}E', f'B25141_{nm_suffix}E'])
+
+    api_url = f"https://api.census.gov/data/2023/acs/acs5?get={','.join(variables)}&for=county:*"
+
+    try:
+        print(" -> Fetching 2023 ACS 5-Year Data from Census API...")
+        res = requests.get(api_url, timeout=30)
+        res.raise_for_status()
+        data = res.json()
+        df_acs = pd.DataFrame(data[1:], columns=data[0])
+    except Exception as e:
+        print(f"\n[ERROR] Failed to fetch ACS data: {e}")
+        return
+
+    # ==========================================
+    # 3. INTERPOLATED MEDIAN CALCULATION
+    # ==========================================
+    val_cols = [col for col in df_acs.columns if col.startswith('B25141')]
+    df_acs[val_cols] = df_acs[val_cols].apply(pd.to_numeric, errors='coerce').fillna(0)
+
+    for i, (m, nm) in enumerate(bucket_suffixes, 1):
+        df_acs[f'bucket_{i}'] = df_acs[f'B25141_{m}E'] + df_acs[f'B25141_{nm}E']
+
+    bounds = [
+        (0, 100), (100, 150), (250, 250), (500, 250),
+        (750, 250), (1000, 500), (1500, 500), (2000, 500),
+        (2500, 500), (3000, 500), (3500, 500), (4000, 0)
+    ]
+
+    def calc_median(row):
+        total_hh = sum(row[f'bucket_{i}'] for i in range(1, 13))
+        if total_hh == 0:
+            return 0
+
+        target_hh = total_hh / 2.0
+        cumulative = 0
+
+        for i in range(1, 13):
+            freq = row[f'bucket_{i}']
+            if cumulative + freq >= target_hh:
+                lower_bound, width = bounds[i-1]
+                if i == 12:
+                    return 4000
+                if freq == 0:
+                    return lower_bound
+                fraction = (target_hh - cumulative) / freq
+                return lower_bound + (fraction * width)
+            cumulative += freq
+        return 0
+
+    print(" -> Calculating interpolated medians...")
+    df_acs['interpolated_median'] = df_acs.apply(calc_median, axis=1)
+
+    df_acs['state_clean'] = df_acs['state'].astype(str).str.zfill(2)
+    df_acs['county_clean'] = df_acs['county'].astype(str).str.zfill(3)
+    df_acs['FIPS'] = df_acs['state_clean'] + df_acs['county_clean']
+
+    df_map = df_acs[df_acs['B25141_001E'] > 0].copy()
+
+    # ==========================================
+    # 4. BUILD THE CHOROPLETH DASHBOARD
+    # ==========================================
+    print(" -> Building HTML Choropleth Map...")
+    fig = px.choropleth(
+        df_map,
+        geojson=counties,
+        locations='FIPS',
+        featureidkey="properties.GEOID",  # Maps to the 'GEOID' property in the Census shapefile
+        color='interpolated_median',
+        color_continuous_scale="Plasma",  # High-contrast multi-hue scale
+        range_color=(df_map['interpolated_median'].quantile(0.05),
+                     df_map['interpolated_median'].quantile(0.95)),
+        scope="usa",
+        hover_name='NAME',
+        hover_data={
+            'FIPS': False,
+            'interpolated_median': ':$,.0f',
+            'B25141_001E': ':,',
+        },
+        labels={
+            'interpolated_median': 'Median Cost ($)',
+            'B25141_001E': 'Total Homeowners'
+        }
+    )
+
+    fig.update_layout(
+        title_text=(
+            "Homeowners Insurance Costs<br>"
+            "<sup>Source: Census ACS; Median, includes fire, hazard, and flood</sup>"
+        ),
+        title_x=0.5,
+        margin={"r": 0, "t": 80, "l": 0, "b": 0},
+        height=700
+    )
+
+    html_path = f"{output_dir}/insurance_costs.html"
+    fig.write_html(html_path, default_width='100%', default_height='100%')
+    print(f" -> Success! Insurance costs HTML saved to {html_path}")
+
+
 # ==========================================
 # 3. MAIN ORCHESTRATOR
 # ==========================================
@@ -2433,11 +2566,11 @@ def main():
     print("  INITIALIZING PLOTTING PIPELINE")
     print("=====================================================\n")
 
-    bls_key = "316a16dbca6c4d8296b5d14a5ed8126d"  # Insert your API key here
-    eia_key = "NjO1ewWurttMKVirMLj7fwBo5kEmttqe1o2XW1MH"  # Insert your API key here
-    bea_key = "483D023F-CE3C-4AAC-9C4A-738E31F03EA4"  # Insert your API key here
-    ita_key = "xS2pttp2AE3s!b!"  # Insert your API key here
-    census_key = "81d2e4410a8fad6186e95a52d6ffc17413cf5bef"  # Insert your API key here
+    bls_key = None  # Insert your API key here
+    eia_key = None  # Insert your API key here
+    bea_key = None  # Insert your API key here
+    # ita_key = None  # Insert your API key here
+    census_key = None  # Insert your API key here
 
     missing_keys = []
     if not bls_key:
@@ -2475,6 +2608,8 @@ def main():
         plot_building_jobs_trend(bls_key, output_dir)
         plot_gdp_by_building_type(bea_key, output_dir)
         plot_ferc_load_growth_forecasts(output_dir)
+        plot_insurance_costs(output_dir)
+
         print(f"\nPipeline complete. Visuals saved to ./{output_dir}")
     except Exception as e:
         print(f"\nPIPELINE HALTED DUE TO ERROR: {e}")

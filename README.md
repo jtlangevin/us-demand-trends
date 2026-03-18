@@ -1,7 +1,46 @@
-Key demand-side snapshots and trends for the US energy sector.
+<div style="text-align: center; font-size: 1.2em; margin-top: 10px;">
+  ⚡ Key demand-side snapshots and trends for the US energy sector ⚡
+</div>
 
-* TOC
-{:toc}
+<br>
+
+<!-- * TOC
+{:toc} -->
+
+<details style="background-color: #f8f9fa; border: 1px solid #e1e4e8; border-radius: 8px; padding: 20px; margin-bottom: 30px; box-shadow: 0 4px 6px rgba(0,0,0,0.05);">
+  <summary style="cursor: pointer; font-weight: bold; font-size: 1.1em; outline: none;">📖 Table of Contents (Click to expand)</summary>
+  
+  <ul class="dynamic-toc">
+    <li data-category="Affordability">Affordability <ul id="list-affordability"></ul></li>
+    <li data-category="Technology Choice">Technology Choice <ul id="list-tech"></ul></li>
+    <li data-category="Electric Load Growth">Electric Load Growth <ul id="list-load"></ul></li>
+    <li data-category="Grid Edge">Grid Edge <ul id="list-grid"></ul></li>
+    <li data-category="Economic Growth">Economic Growth and Competitiveness <ul id="list-econ"></ul></li>
+  </ul>
+</details>
+
+<style>
+  .dynamic-toc { list-style: none; padding-left: 0; margin-top: 15px; }
+  .dynamic-toc > li { font-weight: bold; margin-top: 15px; }
+  
+  /* Category Emojis */
+  li[data-category="Affordability"]::before { content: "💸 "; }
+  li[data-category="Technology Choice"]::before { content: "⚙️ "; }
+  li[data-category="Electric Load Growth"]::before { content: "📈 "; }
+  li[data-category="Grid Edge"]::before { content: "🌐 "; }
+  li[data-category="Economic Growth"]::before { content: "🏗️ "; }
+
+  /* Sub-bullets styling */
+  .dynamic-toc ul { font-weight: normal; list-style-type: circle; padding-left: 25px; margin-top: 5px; }
+  
+  /* Optional: Smooth out the summary arrow */
+  details summary::-webkit-details-marker { display: none; }
+  details summary { list-style: none; }
+  details summary::before { content: "▶ "; font-size: 0.8em; margin-right: 5px; display: inline-block; transition: transform 0.2s; }
+  details[open] summary::before { transform: rotate(90deg); }
+</style>
+
+
 
 <hr style="border: 2px solid #333; margin: 30px 0;">
 
@@ -35,7 +74,7 @@ Energy burden—the percentage of household income spent on energy bills—is a 
 ### Heating Equipment Penetration
 Space heating is one of the largest drivers of residential energy consumption. This visualization maps the current baseline of homes utilizing electric heat and tracks the net shift in that percentage between 2020 and 2024, highlighting regional trends in heating equipment choices.
 
-<iframe src="graphics/heating_equip_map.html" width="100%" height="800px" frameborder="0"></iframe>
+<iframe src="graphics/heating_equip_map.html" width="100%" height="450px" style="border:none;"></iframe>
 
 ---
 
@@ -46,7 +85,14 @@ The spread between electricity and natural gas prices heavily influences electri
 
 ---
 
+### Price Trends by Fuel
+
+Recent changes in energy prices and perceived fuel price volatility can influence consumer decision-making about what types of equipment to adopt. The plots below compare post-2000 trends in inflation-adjusted fuel prices with trends in inflation-adjusted consumer fuel expenditures over the same period, breaking out trends by electricity and natural gas and by residential and commercial consumer types.
+
+<iframe src="graphics/price_expend_trend.html" width="100%" height="650px" style="border:none;"></iframe>
+
 <hr style="border: 2px solid #333; margin: 30px 0;">
+
 
 # Electric Load Growth
 
@@ -106,3 +152,51 @@ Activities in commercial and residential buildings contribute substantially to U
 	<iframe src="graphics/gdp_contributions.html" width="80%" height="800px" frameborder="0"></iframe>
 </div>
 <hr style="border: 2px solid #333; margin: 30px 0;">
+
+
+<script>
+document.addEventListener("DOMContentLoaded", function() {
+  const sections = {
+    "Affordability": "list-affordability",
+    "Technology Choice": "list-tech",
+    "Electric Load Growth": "list-load",
+    "Grid Edge": "list-grid",
+    "Economic Growth and Competitiveness": "list-econ"
+  };
+
+  // Find all H1 and H2 sections (the main categories)
+  document.querySelectorAll('h1, h2').forEach(categoryHeader => {
+    // Clean the header text by removing link icons and extra spaces
+    const catName = categoryHeader.innerText.replace('🔗', '').trim();
+    const targetListId = sections[catName];
+    
+    if (targetListId) {
+      const targetUl = document.getElementById(targetListId);
+      let nextEl = categoryHeader.nextElementSibling;
+      
+      // Look for all H3 headers until we hit the next major section (H1 or H2)
+      while (nextEl && nextEl.tagName !== 'H1' && nextEl.tagName !== 'H2') {
+        
+        // Only grab H3 tags for the sub-bullets
+        if (nextEl.tagName === 'H3') {
+          // GitHub Pages Markdown generates IDs for all headers automatically
+          const link = nextEl.querySelector('a') ? nextEl.querySelector('a').getAttribute('href') : '#' + nextEl.id;
+          const title = nextEl.innerText.replace('🔗', '').trim();
+          
+          const li = document.createElement('li');
+          li.innerHTML = `<a href="${link}">${title}</a>`;
+          targetUl.appendChild(li);
+        }
+        
+        // Move to the next element down the page
+        nextEl = nextEl.nextElementSibling;
+      }
+      
+      // Optional: If a category has no H3 sub-bullets, hide the empty circle bullet
+      if (targetUl.children.length === 0) {
+          targetUl.style.display = 'none';
+      }
+    }
+  });
+});
+</script>

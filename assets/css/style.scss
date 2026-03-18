@@ -18,3 +18,29 @@
 .main-content {
   max-width: 90% !important;
 }
+
+/* Custom Table of Contents Styling */
+#markdown-toc {
+    background-color: #f8f9fa;      /* Light gray background */
+    border: 1px solid #e1e4e8;      /* Subtle border */
+    border-radius: 8px;             /* Rounded corners */
+    padding: 20px 20px 20px 40px;   /* Breathing room */
+    margin-bottom: 30px;
+    box-shadow: 0 4px 6px rgba(0,0,0,0.05); /* Soft drop shadow */
+    font-size: 0.95em;
+}
+
+#markdown-toc li {
+    margin-bottom: 8px;             /* Space out the items */
+}
+
+#markdown-toc a {
+    color: #0366d6;                 /* GitHub blue links */
+    text-decoration: none;
+    font-weight: 500;
+}
+
+#markdown-toc a:hover {
+    text-decoration: underline;
+    color: #005cc5;                 /* Darker blue on hover */
+}

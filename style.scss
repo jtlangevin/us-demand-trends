@@ -7,14 +7,27 @@
 /* For Primer-based themes */
 .container-lg {
   max-width: 90% !important; /* Adjust percentage as needed */
+  border-bottom: none;
 }
 
 /* For Minima-based themes */
 .wrapper {
   max-width: 90% !important;
+  border-bottom: none;
 }
 
 /* For some older Jekyll themes */
 .main-content {
   max-width: 90% !important;
+  border-bottom: none;
+}
+
+/* Remove the default thin underline from Markdown titles and headers */
+h1, h2 {
+  border-bottom: none !important;
+}
+
+/* If you are using the Cayman theme, it also sometimes attaches a border to the page header */
+.page-header {
+  border-bottom: none !important;
 }

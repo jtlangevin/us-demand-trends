@@ -25,6 +25,7 @@ import matplotlib.colors as mcolors
 import numpy as np
 import geopandas as gpd
 import warnings
+import traceback
 from shapely.errors import ShapelyDeprecationWarning
 
 # Suppress geometry warnings for cleaner output
@@ -829,7 +830,8 @@ def plot_county_heating_equipment(census_key, output_dir):
 
     # Save the Interactive HTML
     html_path = f"{output_dir}/heating_equip_map.html"
-    fig_maps.write_html(html_path, default_width='95%', default_height='70vh')
+    # Setting both to 100% ensures it perfectly fills the iframe container
+    fig_maps.write_html(html_path, default_width='100%', default_height='100%')
     print(f" -> Success! Heating equipment map HTML saved to {html_path}")
 
 
@@ -2556,6 +2558,395 @@ def plot_insurance_costs(output_dir):
     print(f" -> Success! Insurance costs HTML saved to {html_path}")
 
 
+def plot_price_expend_benchmarks(output_dir):
+    """
+    Fetches historical and modern EIA data, handles reporting lags,
+    adjusts for inflation, and plots 2000-benchmarked trends.
+    """
+    print("Plotting: Trends in energy prices and expenditures...")
+
+    def fetch_excel(url, sheet_name=0, header=None, skiprows=0):
+        headers = {"User-Agent": "Mozilla/5.0"}
+        response = requests.get(url, headers=headers, timeout=15)
+        response.raise_for_status()
+        return pd.read_excel(
+            io.BytesIO(response.content),
+            sheet_name=sheet_name,
+            header=header,
+            skiprows=skiprows,
+        )
+
+    try:
+        # ==========================================
+        # 1A. FETCH HISTORICAL ELECTRICITY (Up to 2020)
+        # ==========================================
+        print(" -> Fetching Historical Electricity (1990-2020)...")
+        base_elec = "https://www.eia.gov/electricity/data/state"
+
+        df_rev = fetch_excel(f"{base_elec}/revenue_annual.xlsx", header=0, skiprows=1)
+        df_sales = fetch_excel(f"{base_elec}/sales_annual.xlsx", header=0, skiprows=1)
+        df_cust = fetch_excel(f"{base_elec}/customers_annual.xlsx", header=0, skiprows=1)
+
+        def clean_elec_hist(df):
+            cols = [str(c).lower() for c in df.columns]
+            yr_col = df.columns[next(i for i, c in enumerate(cols) if "year" in c)]
+            st_col = df.columns[next(i for i, c in enumerate(cols) if "state" in c)]
+            sec_col = df.columns[
+                next(i for i, c in enumerate(cols) if "sector" in c or "industry" in c)]
+            res_col = df.columns[next(i for i, c in enumerate(cols) if "residential" in c)]
+            com_col = df.columns[next(i for i, c in enumerate(cols) if "commercial" in c)]
+
+            df = df.rename(
+                columns={
+                    yr_col: "Year",
+                    st_col: "State",
+                    sec_col: "Sector",
+                    res_col: "Residential",
+                    com_col: "Commercial",
+                }
+            )
+
+            # Strip all spaces and punctuation to catch EIA typos (e.g., 2009)
+            sector_clean = (
+                df["Sector"].astype(str).str.lower().str.replace(r"[^a-z]", "", regex=True)
+            )
+            df = df[sector_clean.str.contains("totalelectricindustry")]
+            df = df[df["State"] != "US"]
+
+            for col in ["Residential", "Commercial"]:
+                df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
+
+            return df.groupby("Year")[["Residential", "Commercial"]].sum().reset_index()
+
+        df_elec_old = clean_elec_hist(df_rev).merge(
+            clean_elec_hist(df_sales), on="Year", suffixes=("_rev", "_sales")
+        ).merge(clean_elec_hist(df_cust), on="Year")
+
+        df_elec_old.rename(
+            columns={
+                "Residential": "Residential_cust",
+                "Commercial": "Commercial_cust",
+            },
+            inplace=True,
+        )
+
+        # ==========================================
+        # 1B. FETCH MODERN ELECTRICITY (2021-Present)
+        # ==========================================
+        print(" -> Fetching Modern EIA-861M Electricity (2021-Present)...")
+        recent_dfs = []
+        base_861 = "https://www.eia.gov/electricity/data/eia861m"
+
+        for year in range(2021, 2027):
+            urls_to_try = [
+                f"{base_861}/xls/sales_ult_cust_{year}.xlsx",
+                f"{base_861}/archive/xls/sales_ult_cust_{year}.xlsx",
+            ]
+
+            df = None
+            for url in urls_to_try:
+                try:
+                    df = fetch_excel(url, header=0, skiprows=2)
+                    break  # Success, exit the url checking loop
+                except Exception:
+                    continue  # Try the next url
+
+            if df is not None:
+                try:
+                    df_agg = df.iloc[:, [0, 1, 4, 7, 8, 9, 10, 11, 12]].copy()
+                    df_agg.columns = [
+                        "Year", "Month", "State", "Res_Rev", "Res_Sales",
+                        "Res_Cust", "Com_Rev", "Com_Sales", "Com_Cust"
+                    ]
+
+                    df_agg = df_agg.dropna(subset=["State"])
+                    df_agg = df_agg[~df_agg["State"].astype(str).str.contains("US", case=False)]
+
+                    agg_cols = [
+                        "Res_Rev", "Res_Sales", "Res_Cust",
+                        "Com_Rev", "Com_Sales", "Com_Cust"
+                    ]
+                    for col in agg_cols:
+                        df_agg[col] = pd.to_numeric(df_agg[col], errors="coerce").fillna(0)
+
+                    df_month = (
+                        df_agg.groupby("Month")[agg_cols].sum().reset_index()
+                    )
+
+                    # Ensure we have all 12 months before appending
+                    if len(df_month) == 12:
+                        annual = {
+                            "Year": year,
+                            "Residential_rev": df_month["Res_Rev"].sum(),
+                            "Residential_sales": df_month["Res_Sales"].sum(),
+                            "Residential_cust": df_month["Res_Cust"].mean(),
+                            "Commercial_rev": df_month["Com_Rev"].sum(),
+                            "Commercial_sales": df_month["Com_Sales"].sum(),
+                            "Commercial_cust": df_month["Com_Cust"].mean(),
+                        }
+                        if annual["Residential_sales"] > 0:
+                            recent_dfs.append(pd.DataFrame([annual]))
+                    else:
+                        print(f"    [Diagnostic] Skipped {year}: {len(df_month)} months.")
+                except Exception as e:
+                    print(f"    [Diagnostic] Could not parse {year} format: {e}")
+
+        if recent_dfs:
+            df_elec_new = pd.concat(recent_dfs, ignore_index=True)
+            df_elec_raw = pd.concat([df_elec_old, df_elec_new], ignore_index=True)
+        else:
+            df_elec_raw = df_elec_old
+
+        # ==========================================
+        # 2. FETCH NATURAL GAS DATA
+        # ==========================================
+        print(" -> Fetching EIA Natural Gas files...")
+        base_ng = "https://www.eia.gov/dnav/ng/xls"
+        ng_urls = {
+            "pri_res": f"{base_ng}/NG_PRI_SUM_A_EPG0_PRS_DMCF_A.xls",
+            "pri_com": f"{base_ng}/NG_PRI_SUM_A_EPG0_PCS_DMCF_A.xls",
+            "vol_res": f"{base_ng}/NG_CONS_SUM_A_EPG0_VRS_MMCF_A.xls",
+            "vol_com": f"{base_ng}/NG_CONS_SUM_A_EPG0_VCS_MMCF_A.xls",
+            "cust_res": f"{base_ng}/NG_CONS_NUM_A_EPG0_VN3_COUNT_A.xls",
+            "cust_com": f"{base_ng}/NG_CONS_NUM_A_EPG0_VN4_COUNT_A.xls",
+        }
+
+        def clean_ng(df, name):
+            header_idx = None
+            date_col_name = None
+
+            # Scan every cell in the top 15 rows to robustly locate the date/year column
+            for idx, row in df.head(15).iterrows():
+                for cell in row:
+                    val = str(cell).strip().lower()
+                    if val in ["date", "year", "month"]:
+                        header_idx = idx
+                        date_col_name = cell
+                        break
+                if header_idx is not None:
+                    break
+
+            if header_idx is None:
+                raise ValueError(f"Missing header row in {name}. Head:\n{df.head()}")
+
+            df.columns = df.iloc[header_idx]
+            df = df.iloc[header_idx + 1:].reset_index(drop=True)
+
+            us_col = next(
+                (
+                    col
+                    for col in df.columns
+                    if isinstance(col, str)
+                    and ("U.S." in col or "United States" in col)
+                ),
+                None,
+            )
+
+            df = df[[date_col_name, us_col]].copy()
+            df.rename(columns={date_col_name: "Date", us_col: name}, inplace=True)
+
+            df["Year"] = pd.to_datetime(df["Date"], errors="coerce").dt.year
+            df = df.dropna(subset=["Year"])
+            df["Year"] = df["Year"].astype(int)
+            df[name] = pd.to_numeric(df[name], errors="coerce")
+
+            return df[["Year", name]]
+
+        ng_dfs = []
+        for key, url in ng_urls.items():
+            # THE FIX: Explicitly target the 'Data 1' sheet!
+            ng_dfs.append(clean_ng(fetch_excel(url, sheet_name='Data 1', header=None), key))
+
+        df_ng_raw = ng_dfs[0]
+        for d in ng_dfs[1:]:
+            df_ng_raw = df_ng_raw.merge(d, on="Year", how="outer")
+
+        # ==========================================
+        # 3. FETCH CPI FOR INFLATION ADJUSTMENT
+        # ==========================================
+        print(" -> Fetching FRED CPI data...")
+        try:
+            fred_headers = {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9",
+            }
+            cpi_url = "https://fred.stlouisfed.org/graph/fredgraph.csv?id=CPIAUCNS"
+            cpi_resp = requests.get(cpi_url, headers=fred_headers, timeout=10)
+            cpi_resp.raise_for_status()
+
+            df_cpi = pd.read_csv(io.StringIO(cpi_resp.text))
+            date_col = next(c for c in df_cpi.columns if "date" in c.lower())
+            val_col = next(c for c in df_cpi.columns if "cpi" in c.lower())
+
+            df_cpi["Year"] = pd.to_datetime(df_cpi[date_col]).dt.year
+            df_cpi["CPI"] = pd.to_numeric(df_cpi[val_col], errors="coerce")
+            cpi_agg = df_cpi.groupby("Year")["CPI"].mean().reset_index()
+        except Exception:
+            print("   -> Fallback: Using hardcoded annual CPI index...")
+            cpi_dict = {
+                2000: 172.2, 2001: 177.1, 2002: 179.9, 2003: 184.0, 2004: 188.9,
+                2005: 195.3, 2006: 201.6, 2007: 207.3, 2008: 215.3, 2009: 214.5,
+                2010: 218.1, 2011: 224.9, 2012: 229.6, 2013: 233.0, 2014: 236.7,
+                2015: 237.0, 2016: 240.0, 2017: 245.1, 2018: 251.1, 2019: 255.7,
+                2020: 258.8, 2021: 271.0, 2022: 292.6, 2023: 304.7, 2024: 314.0,
+                2025: 320.0, 2026: 325.0,
+            }
+            cpi_agg = pd.DataFrame(list(cpi_dict.items()), columns=["Year", "CPI"])
+
+        # ==========================================
+        # 4. MASTER MERGE, FFILL & CALCULATE
+        # ==========================================
+        df_master = df_elec_raw.merge(df_ng_raw, on="Year", how="outer")
+        df_master = df_master.merge(cpi_agg, on="Year", how="outer")
+
+        current_year = pd.Timestamp.now().year
+        df_master = df_master[
+            (df_master["Year"] >= 2000) & (df_master["Year"] <= current_year)
+        ].sort_values("Year")
+
+        # Forward fill lagging denominators (max 2 years) - Never forward-fill volatile prices!
+        lagging_metrics = [
+            "Residential_cust", "Commercial_cust", "cust_res", "cust_com"
+        ]
+        for col in lagging_metrics:
+            if col in df_master.columns:
+                df_master[col] = df_master[col].ffill(limit=2)
+
+        df_master["elec_res_price"] = (
+            df_master["Residential_rev"] / df_master["Residential_sales"]
+        )
+        df_master["elec_com_price"] = (
+            df_master["Commercial_rev"] / df_master["Commercial_sales"]
+        )
+        df_master["elec_res_exp"] = (
+            (df_master["Residential_rev"] * 1000) / df_master["Residential_cust"]
+        )
+        df_master["elec_com_exp"] = (
+            (df_master["Commercial_rev"] * 1000) / df_master["Commercial_cust"]
+        )
+
+        df_master["ng_res_price"] = df_master["pri_res"]
+        df_master["ng_com_price"] = df_master["pri_com"]
+        df_master["ng_res_exp"] = (
+            (df_master["vol_res"] * 1000 * df_master["pri_res"]) / df_master["cust_res"]
+        )
+        df_master["ng_com_exp"] = (
+            (df_master["vol_com"] * 1000 * df_master["pri_com"]) / df_master["cust_com"]
+        )
+
+        target_cols = [
+            "elec_res_price", "elec_com_price", "elec_res_exp", "elec_com_exp",
+            "ng_res_price", "ng_com_price", "ng_res_exp", "ng_com_exp",
+        ]
+        df_master = df_master.dropna(subset=target_cols)
+
+        latest_year = int(df_master["Year"].max())
+        cpi_latest = df_master.loc[df_master["Year"] == latest_year, "CPI"].values[0]
+
+        for col in target_cols:
+            df_master[f"{col}_real"] = df_master[col] * (cpi_latest / df_master["CPI"])
+
+        base_year_df = df_master[df_master["Year"] == 2000]
+        for col in target_cols:
+            base_val = base_year_df[f"{col}_real"].values[0]
+            df_master[f"{col}_idx"] = (df_master[f"{col}_real"] / base_val) * 100
+
+        # ==========================================
+        # 5. BUILD DASHBOARD (SHARED Y-AXIS)
+        # ==========================================
+        print(f" -> Building HTML Dashboard (Extended to {latest_year})...")
+        fig = make_subplots(
+            rows=1, cols=2,
+            subplot_titles=(
+                ("Trend in Energy Prices<br>"
+                 f"<sup>Source: EIA; Real {latest_year} dollars</sup>"),
+                ("Trend in Expenditures per Customer<br>"
+                 f"<sup>Source: EIA; Real {latest_year} dollars</sup>")
+            ),
+            shared_yaxes=True,
+            horizontal_spacing=0.08,
+        )
+
+        metrics = {
+            "elec_res": {"name": "Electricity - Residential", "c": "#0366d6", "d": "solid"},
+            "elec_com": {"name": "Electricity - Commercial", "c": "#0366d6", "d": "dash"},
+            "ng_res": {"name": "Natural Gas - Residential", "c": "#d73a49", "d": "solid"},
+            "ng_com": {"name": "Natural Gas - Commercial", "c": "#d73a49", "d": "dash"},
+        }
+
+        for key, style in metrics.items():
+            fig.add_trace(
+                go.Scatter(
+                    x=df_master["Year"],
+                    y=df_master[f"{key}_price_idx"],
+                    name=style["name"],
+                    legendgroup=key,
+                    mode="lines+markers",
+                    line=dict(color=style["c"], dash=style["d"], width=2.5),
+                    marker=dict(size=6),
+                    hovertemplate=(
+                        f"<b>{style['name']}</b><br>"
+                        "Year: %{x}<br>Index: %{y:.1f}<extra></extra>"
+                    ),
+                ),
+                row=1, col=1,
+            )
+
+            fig.add_trace(
+                go.Scatter(
+                    x=df_master["Year"],
+                    y=df_master[f"{key}_exp_idx"],
+                    name=style["name"],
+                    legendgroup=key,
+                    showlegend=False,
+                    mode="lines+markers",
+                    line=dict(color=style["c"], dash=style["d"], width=2.5),
+                    marker=dict(size=6),
+                    hovertemplate=(
+                        f"<b>{style['name']}</b><br>"
+                        "Year: %{x}<br>Index: %{y:.1f}<extra></extra>"
+                    ),
+                ),
+                row=1, col=2,
+            )
+
+        fig.add_hline(
+            y=100,
+            line_dash="dot",
+            line_color="black",
+            row="all",
+            col="all",
+            annotation_text="Year 2000 Baseline",
+            annotation_position="bottom right",
+        )
+
+        fig.update_layout(
+            title_x=0.5,
+            height=600,
+            margin=dict(t=80, b=80, l=40, r=40),
+            legend=dict(
+                orientation="h", yanchor="top", y=-0.15, xanchor="center", x=0.5
+            ),
+            plot_bgcolor="rgba(0,0,0,0)",
+        )
+
+        fig.update_xaxes(showgrid=True, gridcolor="lightgray", title_text="Year")
+        fig.update_yaxes(
+            showgrid=True, gridcolor="lightgray", title_text="Index (2000 = 100)", col=1
+        )
+        fig.update_yaxes(showgrid=True, gridcolor="lightgray", col=2)
+
+        html_path = f"{output_dir}/price_expend_trend.html"
+        fig.write_html(html_path, default_width="100%", default_height="100%")
+        print(f" -> Success! Price and expenditure trend HTML saved to {html_path}")
+
+        return df_master
+
+    except Exception:
+        print("\n[ERROR] Pipeline failed:")
+        traceback.print_exc()
+
+
 # ==========================================
 # 3. MAIN ORCHESTRATOR
 # ==========================================
@@ -2609,6 +3000,7 @@ def main():
         plot_gdp_by_building_type(bea_key, output_dir)
         plot_ferc_load_growth_forecasts(output_dir)
         plot_insurance_costs(output_dir)
+        plot_price_expend_benchmarks(output_dir)
 
         print(f"\nPipeline complete. Visuals saved to ./{output_dir}")
     except Exception as e:

@@ -33,9 +33,6 @@ from dotenv import load_dotenv
 warnings.filterwarnings("ignore", category=ShapelyDeprecationWarning)
 warnings.filterwarnings("ignore", message=".*Geometry is in a geographic CRS.*")
 
-# Ensure clean data handling
-pd.set_option('future.no_silent_downcasting', True)
-
 
 # ==========================================
 # 1. LIVE DATA EXTRACTION FUNCTIONS
@@ -1609,7 +1606,7 @@ def get_dsm_snapshot(year):
     ).fillna("Unknown Utility")
 
     df_combined = df_combined.drop(columns=['Utility_dr'])
-    df_combined = df_combined.infer_objects(copy=False).fillna(0)
+    df_combined = df_combined.infer_objects().fillna(0)
 
     # Add year suffix to all numeric columns
     rename_dict = {
@@ -1634,7 +1631,7 @@ def plot_dsm_comprehensive_dashboard(year, output_dir):
     ]
     df_growth = pd.merge(
         df_new, df_old[cols_to_keep], on=['Utility ID', 'State'], how='left'
-    ).infer_objects(copy=False).fillna(0)
+    ).infer_objects().fillna(0)
 
     # Calculate State-level Aggregates (Totals + Sectors)
     agg_dict = {

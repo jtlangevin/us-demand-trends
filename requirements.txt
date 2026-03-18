@@ -7,3 +7,6 @@ geopandas
 shapely
 python-dotenv
 openpyxl
+pyarrow
+xlrd
+fastparquet

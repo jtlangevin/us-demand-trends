@@ -62,17 +62,41 @@ def fetch_eia_v2_data(route, params, api_key):
 def plot_energy_burden(output_dir):
     """Superimposes electric vs total energy burden dual-map HTML."""
     print("Plotting: Energy burden by state (EIA RECS)...")
-    recs_url = (
-        "https://www.eia.gov/consumption/residential/"
-        "data/2020/csv/recs2020_public_v5.csv"
-    )
+    # 1. DYNAMICALLY FIND LATEST RECS DATA
+    recs_df = None
+    target_year = pd.Timestamp.now().year
+    found_year = 2020  # Fallback minimum
 
-    # Pull both dollar amounts in one pass
-    df = pd.read_csv(
-        recs_url,
-        usecols=['state_postal', 'TOTALDOL', 'DOLLAREL', 'MONEYPY']
-    )
+    # Search backward from current year
+    while target_year >= 2020:
+        # EIA often releases multiple versions (v1, v2... up to v5 or higher)
+        # We check common version numbers in descending order to get the latest
+        for v in range(5, 0, -1):
+            url = (
+                f"https://www.eia.gov/consumption/residential/data/{target_year}/"
+                f"csv/recs{target_year}_public_v{v}.csv"
+            )
+            try:
+                # Use a head request to quickly check if the file exists
+                r = requests.head(url, timeout=5)
+                if r.status_code == 200:
+                    print(f" -> Success! Found RECS {target_year} (v{v})")
+                    recs_df = pd.read_csv(url, usecols=[
+                        'state_postal', 'TOTALDOL', 'DOLLAREL', 'MONEYPY'])
+                    found_year = target_year
+                    break
+            except Exception:
+                pass
 
+        if recs_df is not None:
+            break
+        target_year -= 1
+
+    if recs_df is None:
+        print("\n[ERROR] Could not find any valid RECS data.")
+        return
+
+    df = recs_df.copy()
     income_map = {
         1: 2500, 2: 6250, 3: 8750, 4: 11250, 5: 13750,
         6: 17500, 7: 22500, 8: 27500, 9: 32500, 10: 37500,
@@ -107,11 +131,11 @@ def plot_energy_burden(output_dir):
             [{'type': 'bar', 'colspan': 2}, None]              # Bottom: Bar
         ],
         subplot_titles=(
-            ("Total Energy Burden<br>"
+            (f"Total Energy Burden, {found_year}<br>"
              "<sup>Source: RECS</sup>"),
-            ("Electric Energy Burden<br>"
+            (f"Electric Energy Burden, {found_year}<br>"
              "<sup>Source: RECS</sup>"),
-            ("Total and Electric Energy Burden by State<br>"
+            (f"Total and Electric Energy Burden by State, {found_year}<br>"
              "<sup>Source: RECS</sup>")
         )
     )
@@ -294,11 +318,11 @@ def plot_fuel_price_ratio(eia_key, output_dir):
             [{'type': 'bar', 'colspan': 2}, None]
         ],
         subplot_titles=(
-            (f"Residential Customers ({target_year})<br>"
+            (f"Residential Customers, {target_year}<br>"
              "<sup>Source: EIA Surveys</sup>"),
-            (f"Commercial Customers ({target_year})<br>"
+            (f"Commercial Customers, {target_year}<br>"
              "<sup>Source: EIA Surveys</sup>"),
-            ("Electric vs. Gas Price Ratio by State<br>"
+            (f"Electric vs. Gas Price Ratio by State, {target_year}<br>"
              "<sup>Source: EIA Surveys</sup>")
         )
     )
@@ -385,16 +409,21 @@ def plot_permits_construction(census_key, output_dir):
         return
 
     # 2. LOAD BPS DATA (Map data)
-    target_year = 2024
+    # Start searching from the actual current calendar year
+    target_year = pd.Timestamp.now().year
     success_bps = False
+
     while target_year >= 2020:
         year_str = str(target_year)[-2:]
+        # 'a' suffix is annual, '12y' is year-to-date through December
         url_a = f"https://www2.census.gov/econ/bps/County/co{year_str}a.txt"
         url_y = f"https://www2.census.gov/econ/bps/County/co{year_str}12y.txt"
 
         for url in [url_a, url_y]:
             try:
-                df = pd.read_csv(url, dtype=str, on_bad_lines='skip')
+                # We use a short timeout so the "search" through years is fast
+                df = pd.read_csv(
+                    url, dtype=str, on_bad_lines='skip', storage_options={'timeout': 10})
                 if len(df) > 1000:
                     print(f" -> Success! Found BPS data for {target_year}.")
                     success_bps = True
@@ -403,6 +432,8 @@ def plot_permits_construction(census_key, output_dir):
                 pass
         if success_bps:
             break
+
+        # If 2026 isn't out, try 2025; if 2025 isn't out, try 2024, etc.
         target_year -= 1
 
     if not success_bps:
@@ -572,11 +603,11 @@ def plot_permits_construction(census_key, output_dir):
             [{'type': 'bar', 'colspan': 2}, None]
         ],
         subplot_titles=(
-            ("New Housing Permits<br>"
+            (f"New Housing Permits, {target_year}<br>"
              "<sup>Source: Census BPS</sup>"),
-            ("New Housing Construction Cost<br>"
+            (f"New Housing Construction Cost, {target_year}<br>"
              "<sup>Source: Census BPS</sup>"),
-            ("Typical New Single Family Home: Sale Price Breakdown<br>"
+            ("Typical New Single Family Home: Sale Price Breakdown, 2024<br>"
              "<sup>Source: NAHB</sup><br>")
         )
     )
@@ -728,7 +759,7 @@ def plot_county_heating_equipment(census_key, output_dir):
     while curr_year >= 2020:
         df_latest = get_heating_data(curr_year)
         if df_latest is not None:
-            latest_year = curr_year
+            latest_yr = curr_year
             break
         curr_year -= 1
 
@@ -736,8 +767,8 @@ def plot_county_heating_equipment(census_key, output_dir):
         print("\n[WARNING] Could not fetch latest ACS data. Skipping map.")
         return
 
-    base_year = latest_year - 4
-    print(f" -> Comparing {latest_year} vs {base_year}...")
+    base_year = latest_yr - 4
+    print(f" -> Comparing {latest_yr} vs {base_year}...")
     df_prev = get_heating_data(base_year)
 
     if df_prev is None or df_latest is None:
@@ -783,9 +814,9 @@ def plot_county_heating_equipment(census_key, output_dir):
         rows=1, cols=2,
         horizontal_spacing=0.05,  # <-- This pulls the maps right next to each other
         specs=[[{'type': 'choropleth'}, {'type': 'choropleth'}]],
-        subplot_titles=(("Residential Electric Heating Penetration (2024)<br>"
+        subplot_titles=((f"Residential Electric Heating Penetration, {latest_yr}<br>"
                          "<sup>Source: Census ACS</sup>"),
-                        ("Electric Shift From Previous Survey (2020 vs. 2024)<br>"
+                        (f"Electric Shift From Previous Survey, {latest_yr} vs. {base_year}<br>"
                          "<sup>Source: Census ACS</sup>"))
     )
 
@@ -955,82 +986,99 @@ def plot_ann_elec_sales(output_dir):
             return None
 
     # 1. Dynamically find the latest EIA-861 data years
-    latest_year = find_latest_eia_861_year()
-    year_mid = latest_year - 2
-    year_base = latest_year - 5
+    latest_yr = find_latest_eia_861_year()
+    year_mid = latest_yr - 2
+    base_year = latest_yr - 5
 
-    print(f" -> Fetching EIA-861 data for {latest_year}, {year_mid}, and {year_base}...")
-    df_latest = extract_sales_data(latest_year)
+    latest_yr_suff, year_mid_suff, base_year_suff = [
+        str(x)[-2:] for x in [latest_yr, year_mid, base_year]]
+
+    print(f" -> Fetching EIA-861 data for {latest_yr}, {year_mid}, and {base_year}...")
+    # 1. Fetch Data (Already correct in your snippet)
+    df_latest = extract_sales_data(latest_yr)
     df_mid = extract_sales_data(year_mid)
-    df_base = extract_sales_data(year_base)
+    df_base = extract_sales_data(base_year)
 
     if any(df is None for df in [df_latest, df_mid, df_base]):
         return
 
-    # 2. Triple Merge
-    df_m = pd.merge(df_base, df_mid, on=['Utility_Num', 'State'],
-                    suffixes=('_18', '_21'))
-    df_m = pd.merge(df_m, df_latest, on=['Utility_Num', 'State'])
+    # 2. MANUALLY RENAME COLUMNS BEFORE MERGE
+    # This prevents suffix confusion and ensures underscores are consistent
+    def rename_for_year(df, suffix):
+        cols_to_rename = ['Res_Sales', 'Com_Sales', 'Ind_Sales', 'Tra_Sales']
+        rename_map = {c: f"{c}_{suffix}" for c in cols_to_rename}
+        return df.rename(columns=rename_map)
 
-    # Fix naming after double merge
+    df_base_renamed = rename_for_year(df_base, base_year_suff)
+    df_mid_renamed = rename_for_year(df_mid, year_mid_suff)
+    df_latest_renamed = rename_for_year(df_latest, latest_yr_suff)
+
+    # 3. Triple Merge (Simple unique names)
+    df_m = pd.merge(df_base_renamed, df_mid_renamed, on=['Utility_Num', 'State'])
+    df_m = pd.merge(df_m, df_latest_renamed, on=['Utility_Num', 'State'])
+
+    # Fix naming for Utility Name column
     if 'Utility_Name' in df_m.columns:
-        df_m = df_m.rename(columns={'Utility_Name': 'Utility_Name_23'})
+        df_m = df_m.rename(columns={'Utility_Name': f'Utility_Name_{latest_yr_suff}'})
 
     # Calculate Utility-level Totals
-    for y in ['18', '21', '23']:
-        cols = [f'Res_Sales_{y}', f'Com_Sales_{y}',
-                f'Ind_Sales_{y}', f'Tra_Sales_{y}']
-        # Map 2023 columns which won't have suffixes
-        if y == '23':
-            cols = ['Res_Sales', 'Com_Sales', 'Ind_Sales', 'Tra_Sales']
+    for y in [base_year_suff, year_mid_suff, latest_yr_suff]:
+        cols = [f'Res_Sales_{y}', f'Com_Sales_{y}', f'Ind_Sales_{y}', f'Tra_Sales_{y}']
         df_m[f'Total_{y}'] = df_m[cols].sum(axis=1)
 
-    # 3. State-Level Aggregates
-    state_all = df_m.groupby('State').agg({
-        'Total_18': 'sum', 'Total_21': 'sum', 'Total_23': 'sum',
-        'Res_Sales': 'sum', 'Com_Sales': 'sum', 'Ind_Sales': 'sum',
-        'Tra_Sales': 'sum', 'Res_Sales_18': 'sum', 'Com_Sales_18': 'sum',
-        'Ind_Sales_18': 'sum', 'Tra_Sales_18': 'sum'
-    }).reset_index()
+    # 4. State-Level Aggregates
+    agg_map = {
+        f'Total_{base_year_suff}': 'sum',
+        f'Total_{year_mid_suff}': 'sum',
+        f'Total_{latest_yr_suff}': 'sum',
+        f'Res_Sales_{latest_yr_suff}': 'sum',
+        f'Com_Sales_{latest_yr_suff}': 'sum',
+        f'Ind_Sales_{latest_yr_suff}': 'sum',
+        f'Tra_Sales_{latest_yr_suff}': 'sum',
+        f'Res_Sales_{base_year_suff}': 'sum',
+        f'Com_Sales_{base_year_suff}': 'sum',
+        f'Ind_Sales_{base_year_suff}': 'sum',
+        f'Tra_Sales_{base_year_suff}': 'sum'
+    }
+    state_all = df_m.groupby('State').agg(agg_map).reset_index()
 
-    # State Growth Rates
+    # Calculate State Growth Rates
     state_all['State_5yr'] = (
-        (state_all['Total_23'] - state_all['Total_18']) /
-        (state_all['Total_18'] + 1)
+        (state_all[f'Total_{latest_yr_suff}'] - state_all[f'Total_{base_year_suff}']) /
+        (state_all[f'Total_{base_year_suff}'] + 1)
     ) * 100
     state_all['State_2yr'] = (
-        (state_all['Total_23'] - state_all['Total_21']) /
-        (state_all['Total_21'] + 1)
+        (state_all[f'Total_{latest_yr_suff}'] - state_all[f'Total_{year_mid_suff}']) /
+        (state_all[f'Total_{year_mid_suff}'] + 1)
     ) * 100
 
-    # Sector Contributions for the Waterfall (using 5yr as the baseline)
+    # Sector Contributions for the Waterfall
     for s in ['Res', 'Com', 'Ind', 'Tra']:
         state_all[f'{s}_Contrib'] = (
-            (state_all[f'{s}_Sales'] - state_all[f'{s}_Sales_18']) /
-            (state_all['Total_18'] + 1)
+            (state_all[f'{s}_Sales_{latest_yr_suff}'] - state_all[f'{s}_Sales_{base_year_suff}']) /
+            (state_all[f'Total_{base_year_suff}'] + 1)
         ) * 100
 
-    # 4. Largest Utility Metrics
+    # 5. Largest Utility Metrics
     df_leaders = df_m.sort_values(
-        ['State', 'Total_23'], ascending=[True, False]
+        ['State', f'Total_{latest_yr_suff}'], ascending=[True, False]
     ).groupby('State').head(1).copy()
 
     df_leaders['Util_5yr'] = (
-        (df_leaders['Total_23'] - df_leaders['Total_18']) /
-        (df_leaders['Total_18'] + 1)
+        (df_leaders[f'Total_{latest_yr_suff}'] - df_leaders[f'Total_{base_year_suff}']) /
+        (df_leaders[f'Total_{base_year_suff}'] + 1)
     ) * 100
     df_leaders['Util_2yr'] = (
-        (df_leaders['Total_23'] - df_leaders['Total_21']) /
-        (df_leaders['Total_21'] + 1)
+        (df_leaders[f'Total_{latest_yr_suff}'] - df_leaders[f'Total_{year_mid_suff}']) /
+        (df_leaders[f'Total_{year_mid_suff}'] + 1)
     ) * 100
 
-    # 5. Mapping Prep
-    df_plot = pd.merge(
-        state_all,
-        df_leaders[['State', 'Utility_Name_23', 'Util_5yr',
-                    'Util_2yr', 'Total_23']],
-        on='State', suffixes=('_State', '_Leader')
-    )
+    # Mapping Prep (Avoid renaming collisions)
+    df_leaders_sub = df_leaders[[
+        'State', f'Utility_Name_{latest_yr_suff}', 'Util_5yr', 'Util_2yr', f'Total_{latest_yr_suff}'
+    ]].rename(columns={f'Total_{latest_yr_suff}': f'Leader_Total_{latest_yr_suff}'})
+
+    df_plot = pd.merge(state_all, df_leaders_sub, on='State')
 
     def apply_loc(row):
         st = str(row['State']).upper().strip()
@@ -1044,10 +1092,10 @@ def plot_ann_elec_sales(output_dir):
     # ENHANCED HOVER WITH ACCELERATION METRICS
     def make_hover(row):
         line1 = f"<b>STATE: {row['State']}</b><br>"
-        line2 = f"Total Sales: {row['Total_23_State']:,.0f} MWh<br>"
+        line2 = f"Total Sales: {row[('Total_' + latest_yr_suff)]:,.0f} MWh<br>"
         line3 = f"State 5-yr Growth: <b>{row['State_5yr']:+.1f}%</b><br>"
         line4 = f"State 2-yr Growth: <b>{row['State_2yr']:+.1f}%</b><br>---<br>"
-        line5 = f"Market Leader: {row['Utility_Name_23']}<br>"
+        line5 = f"Market Leader: {row[('Utility_Name_' + latest_yr_suff)]}<br>"
         line6 = f"Leader 5-yr Growth: <b>{row['Util_5yr']:+.1f}%</b><br>"
         line7 = f"Leader 2-yr Growth: <b>{row['Util_2yr']:+.1f}%</b>"
         return f"{line1}{line2}{line3}{line4}{line5}{line6}{line7}"
@@ -1060,21 +1108,22 @@ def plot_ann_elec_sales(output_dir):
         specs=[[{'type': 'scattergeo'}], [{'type': 'bar'}]],
         horizontal_spacing=0.05,  # <-- This pulls the maps right next to each other
         subplot_titles=(
-            ("Annual Electricity Sales by State (2023) and Demand Growth (2018-2023)<br>"
+            (f"Annual Electricity Sales by State in {latest_yr} and Demand Growth, "
+             f"{base_year}-{latest_yr}<br>"
              "<sup>Source: EIA 861</sup>"),
-            ("States with Highest Growth in Total Sales (2018-2023), by Sector<br>"
+            (f"States with Highest Growth in Total Sales by Sector, {latest_yr}-{base_year}<br>"
              "<sup>Source: EIA 861</sup>")
         )
     )
 
     # Map
-    sizeref = 2. * df_plot['Total_23_State'].max() / (65 ** 2)
+    sizeref = 2. * df_plot[('Total_' + latest_yr_suff)].max() / (65 ** 2)
     fig.add_trace(go.Scattergeo(
         lon=df_plot['Lon'], lat=df_plot['Lat'], text=df_plot['HoverText'],
         hoverinfo='text',
         showlegend=False,  # FIX: explicitly hide map from legend
         marker=dict(
-            size=df_plot['Total_23_State'], sizemode='area', sizeref=sizeref,
+            size=df_plot[('Total_' + latest_yr_suff)], sizemode='area', sizeref=sizeref,
             color=df_plot['State_5yr'], colorscale='RdBu', cmin=-20, cmax=20,
             showscale=True, colorbar=dict(title="5-yr Growth %", x=0.9,
                                           len=0.5, y=0.75)
@@ -1240,37 +1289,60 @@ def plot_peak_data(output_dir):
         'DC': (38.9071, -77.0368)
     }
 
-    latest_year = find_latest_eia_861_year()
-    base_year = latest_year - 5
+    latest_yr = find_latest_eia_861_year()
+    base_year = latest_yr - 5
 
-    print(f" -> Comparing Peak Data: {latest_year} vs {base_year}...")
-    df_latest = extract_peak_data(latest_year)
+    latest_yr_suff, base_year_suff = [str(x)[-2:] for x in [latest_yr, base_year]]
+
+    print(f" -> Comparing Peak Data: {latest_yr} vs {base_year}...")
+    df_latest = extract_peak_data(latest_yr)
     df_base = extract_peak_data(base_year)
     if df_latest is None or df_base is None:
         return
 
-    # 1. Merge and Filter
+    # 1. MANUALLY RENAME COLUMNS BEFORE MERGE
+    # This guarantees consistent naming (e.g., Summer_MW_24, Winter_MW_24)
+    def rename_peak_cols(df, suffix):
+        return df.rename(columns={
+            'Summer_MW': f'Summer_MW_{suffix}',
+            'Winter_MW': f'Winter_MW_{suffix}'
+        })
+
+    df_latest_renamed = rename_peak_cols(df_latest, latest_yr_suff)
+    df_base_renamed = rename_peak_cols(df_base, base_year_suff)
+
+    # 2. Merge and Filter
     df_m = pd.merge(
-        df_base, df_latest, on=['Util_ID', 'State'], suffixes=('_18', '_23')
+        df_base_renamed, df_latest_renamed,
+        on=['Util_ID', 'State']
     )
     valid_us_states = set(state_centroids.keys())
 
+    # 3. Aggregate by State
+    # Note: We must use the exact names created in the rename function above
     st = df_m.groupby('State').agg({
-        'Summer_MW_23': 'sum', 'Winter_MW_23': 'sum',
-        'Summer_MW_18': 'sum', 'Winter_MW_18': 'sum'
+        f'Summer_MW_{latest_yr_suff}': 'sum',
+        f'Winter_MW_{latest_yr_suff}': 'sum',
+        f'Summer_MW_{base_year_suff}': 'sum',
+        f'Winter_MW_{base_year_suff}': 'sum'
     }).reset_index()
+
     st = st[st['State'].isin(valid_us_states)].copy()
 
-    # 2. Calculate Ratios and Growth
-    st['Ratio'] = st['Summer_MW_23'] / (st['Winter_MW_23'] + 1)
-    st['Max_MW'] = st[['Summer_MW_23', 'Winter_MW_23']].max(axis=1)
+    # 4. Calculate Ratios and Growth
+    # We use the full column names (including _MW) to avoid KeyErrors
+    st['Ratio'] = st[f'Summer_MW_{latest_yr_suff}'] / (st[f'Winter_MW_{latest_yr_suff}'] + 1)
+
+    st['Max_MW'] = st[[f'Summer_MW_{latest_yr_suff}', f'Winter_MW_{latest_yr_suff}']].max(axis=1)
 
     st['Winter_Growth'] = (
-        (st['Winter_MW_23'] - st['Winter_MW_18']) / (st['Winter_MW_18'] + 1)
+        (st[f'Winter_MW_{latest_yr_suff}'] - st[f'Winter_MW_{base_year_suff}']) /
+        (st[f'Winter_MW_{base_year_suff}'] + 1)
     ) * 100
 
     st['Summer_Growth'] = (
-        (st['Summer_MW_23'] - st['Summer_MW_18']) / (st['Summer_MW_18'] + 1)
+        (st[f'Summer_MW_{latest_yr_suff}'] - st[f'Summer_MW_{base_year_suff}']) /
+        (st[f'Summer_MW_{base_year_suff}'] + 1)
     ) * 100
 
     # 3. Setup Layout
@@ -1284,11 +1356,11 @@ def plot_peak_data(output_dir):
             [{"type": "bar"}, {"type": "bar"}]
         ],
         subplot_titles=(
-            ("Peak Demand Seasonality<br>"
+            (f"Peak Demand Seasonality, {latest_yr}<br>"
              "<sup>Source: EIA 861</sup>"),
-            ("States with Highest Growth in Winter Peak Demand<br>"
+            (f"States with Highest Growth in Winter Peak Demand, {latest_yr}<br>"
              "<sup>Source: EIA 861</sup>"),
-            ("States with Highest Growth in Summer Peak Demand<br>"
+            (f"States with Highest Growth in Summer Peak Demand, {latest_yr}<br>"
              "<sup>Source: EIA 861</sup>")
         )
     )
@@ -1347,15 +1419,15 @@ def plot_peak_data(output_dir):
         )
     )
 
-    fig.update_yaxes(title_text="% Growth (2018-23)", row=2, col=1)
-    fig.update_yaxes(title_text="% Growth (2018-23)", row=2, col=2)
+    fig.update_yaxes(title_text=f"% Growth ({base_year}-{latest_yr})", row=2, col=1)
+    fig.update_yaxes(title_text=f"% Growth ({base_year}-{latest_yr})", row=2, col=2)
 
     html_path = f"{output_dir}/peak_demand.html"
     fig.write_html(html_path)
     print(f" -> Success! Peak demand plots saved to {html_path}")
 
 
-def generate_eia_mapping_df(year=2023):
+def generate_eia_mapping_df(year):
     """Fetches EIA-861 master Utility-to-State mapping."""
     base_urls = [
         f"https://www.eia.gov/electricity/data/eia861/zip/f861{year}.zip",
@@ -1495,10 +1567,10 @@ def fetch_historical_om_ca(eia_df):
         return None, None, None
 
 
-def plot_utility_costs(output_dir):
+def plot_utility_costs(year, output_dir):
     """Utility annual expenditures in generation, transmission, and distribution."""
     print("Plotting: Utility expenditures (FERC 1/PUDL)...")
-    eia_df = generate_eia_mapping_df()
+    eia_df = generate_eia_mapping_df(year)
     top_s, ca_t, ly = fetch_historical_om_ca(eia_df)
     if top_s is None:
         return
@@ -1510,7 +1582,7 @@ def plot_utility_costs(output_dir):
         rows=2, cols=1, vertical_spacing=0.12,
         horizontal_spacing=0.05,  # <-- This pulls the maps right next to each other
         subplot_titles=(
-            (f"States with Highest Utility O&M Costs ({ly})<br>"
+            (f"States with Highest Utility O&M Costs, {ly}<br>"
              "<sup>Source: FERC Form 1 via PUDL</sup>"),
             ("CA 10-Year Utility O&M Cost Trend<br>"
              "<sup>Source: FERC Form 1 via PUDL</sup>"))
@@ -1638,13 +1710,12 @@ def get_dsm_snapshot(year):
     return df_combined.rename(columns=rename_dict)
 
 
-def plot_dsm_comprehensive_dashboard(output_dir):
-    latest_year = find_latest_eia_861_year()
-    base_year = latest_year - 5
-    print(f"Plotting: DSM potential ({latest_year} vs {base_year})...")
+def plot_dsm_comprehensive_dashboard(latest_yr, output_dir):
+    base_year = latest_yr - 5
+    print(f"Plotting: DSM potential ({latest_yr} vs {base_year})...")
 
     df_old = get_dsm_snapshot(base_year)
-    df_new = get_dsm_snapshot(latest_year)
+    df_new = get_dsm_snapshot(latest_yr)
 
     if df_old is None or df_new is None:
         return
@@ -1660,27 +1731,27 @@ def plot_dsm_comprehensive_dashboard(output_dir):
     # Calculate State-level Aggregates (Totals + Sectors)
     agg_dict = {
         c: 'sum' for c in df_growth.columns
-        if str(latest_year) in c or str(base_year) in c
+        if str(latest_yr) in c or str(base_year) in c
     }
     state_stats = df_growth.groupby('State').agg(agg_dict).reset_index()
 
     # 2. Calculate Growth Metrics (ABSOLUTE MW + Percentages for Hovers)
     for sect in ['Res', 'Com', 'Ind', 'Trans']:
         state_stats[f'EE_Gr_{sect}'] = (
-            state_stats[f'EE_{sect}_{latest_year}'] -
+            state_stats[f'EE_{sect}_{latest_yr}'] -
             state_stats[f'EE_{sect}_{base_year}']
         )
         state_stats[f'DR_Gr_{sect}'] = (
-            state_stats[f'DR_Pot_{sect}_{latest_year}'] -
+            state_stats[f'DR_Pot_{sect}_{latest_yr}'] -
             state_stats[f'DR_Pot_{sect}_{base_year}']
         )
 
     # Absolute Total Growth
     state_stats['EE_State_Growth'] = (
-        state_stats[f'EE_Total_{latest_year}'] - state_stats[f'EE_Total_{base_year}']
+        state_stats[f'EE_Total_{latest_yr}'] - state_stats[f'EE_Total_{base_year}']
     )
     state_stats['DR_State_Growth'] = (
-        state_stats[f'DR_Pot_Total_{latest_year}'] -
+        state_stats[f'DR_Pot_Total_{latest_yr}'] -
         state_stats[f'DR_Pot_Total_{base_year}']
     )
 
@@ -1691,20 +1762,20 @@ def plot_dsm_comprehensive_dashboard(output_dir):
         return 100 if new > 0 else 0
 
     state_stats['EE_State_Pct'] = state_stats.apply(
-        lambda r: calc_pct(r[f'EE_Total_{latest_year}'], r[f'EE_Total_{base_year}']),
+        lambda r: calc_pct(r[f'EE_Total_{latest_yr}'], r[f'EE_Total_{base_year}']),
         axis=1
     ).apply(lambda x: f"{x:+d}")
 
     state_stats['DR_State_Pct'] = state_stats.apply(
         lambda r: calc_pct(
-            r[f'DR_Pot_Total_{latest_year}'], r[f'DR_Pot_Total_{base_year}']
+            r[f'DR_Pot_Total_{latest_yr}'], r[f'DR_Pot_Total_{base_year}']
         ),
         axis=1
     ).apply(lambda x: f"{x:+d}")
 
     state_stats['DR_Util_Pct'] = (
-        state_stats[f'DR_Act_Total_{latest_year}'] /
-        state_stats[f'DR_Pot_Total_{latest_year}'] * 100
+        state_stats[f'DR_Act_Total_{latest_yr}'] /
+        state_stats[f'DR_Pot_Total_{latest_yr}'] * 100
     ).fillna(0).round(0).astype(int)
 
     # Top Utility Logic for Hovers
@@ -1718,7 +1789,7 @@ def plot_dsm_comprehensive_dashboard(output_dir):
 
     ee_meta = state_stats['State'].apply(
         lambda x: get_top_util_pct(
-            x, f'EE_Total_{latest_year}', f'EE_Total_{base_year}'
+            x, f'EE_Total_{latest_yr}', f'EE_Total_{base_year}'
         )
     )
     state_stats[['Top_EE_Name', 'Top_EE_Val', 'Top_EE_Str']] = pd.DataFrame(
@@ -1727,7 +1798,7 @@ def plot_dsm_comprehensive_dashboard(output_dir):
 
     dr_meta = state_stats['State'].apply(
         lambda x: get_top_util_pct(
-            x, f'DR_Pot_Total_{latest_year}', f'DR_Pot_Total_{base_year}'
+            x, f'DR_Pot_Total_{latest_yr}', f'DR_Pot_Total_{base_year}'
         )
     )
     state_stats[['Top_DR_Name', 'Top_DR_Val', 'Top_DR_Str']] = pd.DataFrame(
@@ -1752,13 +1823,13 @@ def plot_dsm_comprehensive_dashboard(output_dir):
             [{"type": "xy"}, {"type": "xy"}]
         ],
         subplot_titles=(
-            ("Energy Efficiency Avoided Peak<br>"
+            (f"Energy Efficiency Avoided Peak, {latest_yr}<br>"
              "<sup>Source: EIA 861</sup>"),
-            ("Demand Response Avoided Peak (Potential and Actual)<br>"
+            (f"Demand Response Avoided Peak (Potential and Actual), {latest_yr}<br>"
              "<sup>Source: EIA 861</sup>"),
-            (f"States with Highest EE Growth, by Sector ({base_year}-{latest_year})<br>"
+            (f"States with Highest EE Growth, by Sector ({base_year}-{latest_yr})<br>"
              "<sup>Source: EIA 861</sup>"),
-            (f"States with Highest DR Potential Growth, by Sector ({base_year}-{latest_year}<br>"
+            (f"States with Highest DR Potential Growth, by Sector ({base_year}-{latest_yr})<br>"
              "<sup>Source: EIA 861</sup>")
         )
     )
@@ -1775,7 +1846,7 @@ def plot_dsm_comprehensive_dashboard(output_dir):
 
     fig.add_trace(go.Scattergeo(
         locations=state_stats['State'], locationmode='USA-states',
-        marker=dict(size=state_stats[f'EE_Total_{latest_year}'], sizemode='area',
+        marker=dict(size=state_stats[f'EE_Total_{latest_yr}'], sizemode='area',
                     sizeref=b_size, color='rgba(31, 119, 180, 0.7)',
                     line=dict(width=1, color='white')),
         customdata=state_stats[
@@ -1794,7 +1865,7 @@ def plot_dsm_comprehensive_dashboard(output_dir):
 
     fig.add_trace(go.Scattergeo(
         locations=state_stats['State'], locationmode='USA-states',
-        marker=dict(size=state_stats[f'DR_Pot_Total_{latest_year}'],
+        marker=dict(size=state_stats[f'DR_Pot_Total_{latest_yr}'],
                     sizemode='area', sizeref=b_size,
                     color='rgba(144, 238, 144, 0.4)', line=dict(width=0)),
         customdata=state_stats[
@@ -1805,7 +1876,7 @@ def plot_dsm_comprehensive_dashboard(output_dir):
 
     fig.add_trace(go.Scattergeo(
         locations=state_stats['State'], locationmode='USA-states',
-        marker=dict(size=state_stats[f'DR_Act_Total_{latest_year}'],
+        marker=dict(size=state_stats[f'DR_Act_Total_{latest_yr}'],
                     sizemode='area', sizeref=b_size,
                     color='rgba(44, 160, 44, 0.9)',
                     line=dict(width=1, color='white')),
@@ -2010,10 +2081,16 @@ def plot_building_jobs_trend(bls_key, output_dir):
                 )
             ))
 
+    # Dynamically extract the maximum year and month found in the actual data
+    max_date = df['Date'].max()
+    max_year = max_date.year
+    max_month_name = max_date.strftime('%B')  # e.g., "December"
+
     fig.update_layout(
         title=(
-            "Trends in Buildings-related Jobs (2006-2024)<br>"
-            "<sup>Source: BLS; 12-Month Trailing Average</sup>"
+            f"Trends in Buildings-related Jobs (2006-{max_year})<br>"
+            f"<sup>Source: BLS; Data through {max_month_name} {max_year}; "
+            "12-Month Trailing Average</sup>"
         ),
         xaxis_title="Year",
         yaxis_title="Total Employees (Thousands)",
@@ -2090,12 +2167,18 @@ def plot_gdp_by_building_type(bea_key, output_dir):
         print("\n[WARNING] No data returned from BEA API.")
         return
 
-    # Convert values and filter for the last 20 years
+    # 1. Convert data types
     df['DataValue'] = pd.to_numeric(df['DataValue'], errors='coerce')
     df['Year'] = pd.to_numeric(df['Year'], errors='coerce')
-    # Dynamic year with 1-year lag for finalized annual GDP
-    current_year = pd.Timestamp.now().year - 1
-    df = df[(df['Year'] >= (current_year - 20)) & (df['Year'] <= current_year)]
+
+    # 2. Dynamically determine the maximum available year in the data
+    max_gdp_year = int(df['Year'].max())
+    min_gdp_year = max_gdp_year - 20
+
+    print(f" -> Found GDP data through {max_gdp_year}. Plotting {min_gdp_year}-{max_gdp_year}.")
+
+    # 3. Filter for the 20-year trailing window
+    df = df[(df['Year'] >= min_gdp_year) & (df['Year'] <= max_gdp_year)]
 
     # Map mutually exclusive NAICS equivalents to our 3 building types
     mapping = {
@@ -2173,7 +2256,8 @@ def plot_gdp_by_building_type(bea_key, output_dir):
 
     fig.update_layout(
         title=(
-            "GDP Contributions of Activities in Residential and Commercial Buildings<br>"
+            "GDP Contributions of Activities in Residential and Commercial Buildings, "
+            f"{min_gdp_year}-{max_gdp_year}<br>"
             "<sup>Source: BEA</sup>"
         ),
         xaxis_title="Year",
@@ -2250,8 +2334,8 @@ def plot_ferc_load_growth_forecasts(output_dir):
         pd.to_datetime(df_ferc_all[date_col]).dt.year if
         date_col == 'report_date' else df_ferc_all[date_col])
 
-    latest_year = df_ferc_all['report_year_clean'].max()
-    df_latest = df_ferc_all[df_ferc_all['report_year_clean'] == latest_year].copy()
+    latest_yr = df_ferc_all['report_year_clean'].max()
+    df_latest = df_ferc_all[df_ferc_all['report_year_clean'] == latest_yr].copy()
     df_latest['years_out'] = df_latest['forecast_year'] - df_latest['report_year_clean']
 
     # Max of Summer vs Winter Peak
@@ -2366,9 +2450,9 @@ def plot_ferc_load_growth_forecasts(output_dir):
         rows=1, cols=2,
         specs=[[{'type': 'scattergeo'}, {'type': 'scattergeo'}]],
         subplot_titles=(
-            ("5-Year Projection<br>"
+            (f"5-Year Projection, {latest_yr}<br>"
              "<sup>Source: FERC Form 714 via PUDL</sup>"),
-            ("10-Year Projection<br>"
+            (f"10-Year Projection, {latest_yr}<br>"
              "<sup>Source: FERC Form 714 via PUDL</sup>")),
         horizontal_spacing=0  # <-- This pulls the maps right next to each other
     )
@@ -2458,42 +2542,68 @@ def plot_insurance_costs(output_dir):
     print("Plotting: Homeowner insurance costs (ACS 2023)...")
 
     # ==========================================
-    # 1. LOAD OFFICIAL CENSUS BOUNDARIES (Fixes CT)
+    # 1. DYNAMICALLY FIND LATEST ACS YEAR & DATA
     # ==========================================
-    # Using the official 2022/2023 Census Cartographic Boundary file (20m resolution is fast)
-    census_shp_url = "https://www2.census.gov/geo/tiger/GENZ2022/shp/cb_2022_us_county_20m.zip"
-    try:
-        print(" -> Fetching official Census County Boundaries (includes new CT regions)...")
-        gdf = gpd.read_file(census_shp_url)
-        # Convert the GeoDataFrame directly to a GeoJSON dictionary for Plotly
-        counties = json.loads(gdf.to_json())
-    except Exception as e:
-        print(f"\n[ERROR] Failed to download official Census boundaries: {e}")
+    target_year = pd.Timestamp.now().year
+    success_acs = False
+
+    # We loop backward to find the latest year the Census API actually supports
+    while target_year >= 2021:
+        bucket_suffixes = [
+            ('003', '016'), ('004', '017'), ('005', '018'), ('006', '019'),
+            ('007', '020'), ('008', '021'), ('009', '022'), ('010', '023'),
+            ('011', '024'), ('012', '025'), ('013', '026'), ('014', '027')
+        ]
+
+        variables = ['NAME', 'B25141_001E']
+        for m_suffix, nm_suffix in bucket_suffixes:
+            variables.extend([f'B25141_{m_suffix}E', f'B25141_{nm_suffix}E'])
+
+        api_url = (
+            f"https://api.census.gov/data/{target_year}/acs/acs5?"
+            f"get={','.join(variables)}&for=county:*"
+        )
+
+        try:
+            print(f" -> Checking Census ACS API for {target_year}...")
+            res = requests.get(api_url, timeout=15)
+            if res.status_code == 200:
+                data = res.json()
+                df_acs = pd.DataFrame(data[1:], columns=data[0])
+                print(f" -> Success! Found ACS data for {target_year}.")
+                success_acs = True
+                break
+        except Exception:
+            pass
+        target_year -= 1
+
+    if not success_acs:
+        print("\n[ERROR] Could not find any valid ACS data years.")
         return
 
     # ==========================================
-    # 2. FETCH ACS DATA
+    # 2. LOAD CORRESPONDING CENSUS BOUNDARIES
     # ==========================================
-    bucket_suffixes = [
-        ('003', '016'), ('004', '017'), ('005', '018'), ('006', '019'),
-        ('007', '020'), ('008', '021'), ('009', '022'), ('010', '023'),
-        ('011', '024'), ('012', '025'), ('013', '026'), ('014', '027')
-    ]
+    # Boundary files usually lag or match the ACS data year.
+    # We try the data year first, then fall back to the prior year.
+    boundary_year = target_year
+    counties = None
+    while boundary_year >= 2022:
+        census_shp_url = (
+            f"https://www2.census.gov/geo/tiger/GENZ{boundary_year}/"
+            f"shp/cb_{boundary_year}_us_county_20m.zip"
+        )
+        try:
+            print(f" -> Attempting to fetch boundaries for {boundary_year}...")
+            gdf = gpd.read_file(census_shp_url)
+            counties = json.loads(gdf.to_json())
+            print(f" -> Success! Using {boundary_year} boundary files.")
+            break
+        except Exception:
+            boundary_year -= 1
 
-    variables = ['NAME', 'B25141_001E']
-    for m_suffix, nm_suffix in bucket_suffixes:
-        variables.extend([f'B25141_{m_suffix}E', f'B25141_{nm_suffix}E'])
-
-    api_url = f"https://api.census.gov/data/2023/acs/acs5?get={','.join(variables)}&for=county:*"
-
-    try:
-        print(" -> Fetching 2023 ACS 5-Year Data from Census API...")
-        res = requests.get(api_url, timeout=30)
-        res.raise_for_status()
-        data = res.json()
-        df_acs = pd.DataFrame(data[1:], columns=data[0])
-    except Exception as e:
-        print(f"\n[ERROR] Failed to fetch ACS data: {e}")
+    if counties is None:
+        print("\n[ERROR] Failed to download valid Census boundaries.")
         return
 
     # ==========================================
@@ -2569,7 +2679,7 @@ def plot_insurance_costs(output_dir):
 
     fig.update_layout(
         title_text=(
-            "Homeowners Insurance Costs<br>"
+            f"Homeowners Insurance Costs, {target_year}<br>"
             "<sup>Source: Census ACS; Median, includes fire, hazard, and flood</sup>"
         ),
         title_x=0.5,
@@ -2864,8 +2974,8 @@ def plot_price_expend_benchmarks(output_dir):
         ]
         df_master = df_master.dropna(subset=target_cols)
 
-        latest_year = int(df_master["Year"].max())
-        cpi_latest = df_master.loc[df_master["Year"] == latest_year, "CPI"].values[0]
+        latest_yr = int(df_master["Year"].max())
+        cpi_latest = df_master.loc[df_master["Year"] == latest_yr, "CPI"].values[0]
 
         for col in target_cols:
             df_master[f"{col}_real"] = df_master[col] * (cpi_latest / df_master["CPI"])
@@ -2878,14 +2988,14 @@ def plot_price_expend_benchmarks(output_dir):
         # ==========================================
         # 5. BUILD DASHBOARD (SHARED Y-AXIS)
         # ==========================================
-        print(f" -> Building HTML Dashboard (Extended to {latest_year})...")
+        print(f" -> Building HTML Dashboard (Extended to {latest_yr})...")
         fig = make_subplots(
             rows=1, cols=2,
             subplot_titles=(
                 ("Trend in Energy Prices<br>"
-                 f"<sup>Source: EIA; Real {latest_year} dollars</sup>"),
-                ("Trend in Expenditures per Customer<br>"
-                 f"<sup>Source: EIA; Real {latest_year} dollars</sup>")
+                 f"<sup>Source: EIA; Real {latest_yr} dollars</sup>"),
+                ("Trend in Energy Expenditures per Customer<br>"
+                 f"<sup>Source: EIA; Real {latest_yr} dollars</sup>")
             ),
             shared_yaxes=True,
             horizontal_spacing=0.08,
@@ -3015,14 +3125,15 @@ def main():
         os.makedirs(output_dir)
 
     try:
+        latest_eia_year = find_latest_eia_861_year()
         plot_energy_burden(output_dir)
         plot_fuel_price_ratio(eia_key, output_dir)
         plot_permits_construction(census_key, output_dir)
         plot_county_heating_equipment(census_key, output_dir)
         plot_ann_elec_sales(output_dir)
         plot_peak_data(output_dir)
-        plot_utility_costs(output_dir)
-        plot_dsm_comprehensive_dashboard(output_dir)
+        plot_utility_costs(latest_eia_year, output_dir)
+        plot_dsm_comprehensive_dashboard(latest_eia_year, output_dir)
         plot_building_jobs_trend(bls_key, output_dir)
         plot_gdp_by_building_type(bea_key, output_dir)
         plot_ferc_load_growth_forecasts(output_dir)

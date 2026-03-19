@@ -1111,7 +1111,7 @@ def plot_ann_elec_sales(output_dir):
             (f"Annual Electricity Sales by State in {latest_yr} and Demand Growth, "
              f"{base_year}-{latest_yr}<br>"
              "<sup>Source: EIA 861</sup>"),
-            (f"States with Highest Growth in Total Sales by Sector, {latest_yr}-{base_year}<br>"
+            (f"States with Highest Growth in Total Sales by Sector, {base_year}-{latest_yr}<br>"
              "<sup>Source: EIA 861</sup>")
         )
     )
@@ -1358,9 +1358,9 @@ def plot_peak_data(output_dir):
         subplot_titles=(
             (f"Peak Demand Seasonality, {latest_yr}<br>"
              "<sup>Source: EIA 861</sup>"),
-            (f"States with Highest Growth in Winter Peak Demand, {latest_yr}<br>"
+            (f"States with Highest Growth in Winter Peak Demand, {base_year}-{latest_yr}<br>"
              "<sup>Source: EIA 861</sup>"),
-            (f"States with Highest Growth in Summer Peak Demand, {latest_yr}<br>"
+            (f"States with Highest Growth in Summer Peak Demand, {base_year}-{latest_yr}<br>"
              "<sup>Source: EIA 861</sup>")
         )
     )
@@ -1419,8 +1419,8 @@ def plot_peak_data(output_dir):
         )
     )
 
-    fig.update_yaxes(title_text=f"% Growth ({base_year}-{latest_yr})", row=2, col=1)
-    fig.update_yaxes(title_text=f"% Growth ({base_year}-{latest_yr})", row=2, col=2)
+    fig.update_yaxes(title_text="5-Year Growth (%)", row=2, col=1)
+    fig.update_yaxes(title_text="5-Year Growth (%)", row=2, col=2)
 
     html_path = f"{output_dir}/peak_demand.html"
     fig.write_html(html_path)
@@ -2061,6 +2061,9 @@ def plot_building_jobs_trend(bls_key, output_dir):
     # Build the Plotly line chart
     fig = go.Figure()
 
+    # Set the hovermode to 'x unified' to show one date at the top
+    fig.update_layout(hovermode="x unified")
+
     # We loop through the groups first so they appear organized in the legend
     for grp in df['Legend Group'].unique():
         df_group = df[df['Legend Group'] == grp]
@@ -2074,11 +2077,9 @@ def plot_building_jobs_trend(bls_key, output_dir):
                 line=dict(width=2, color=color_dict.get(category)),
                 legendgroup=grp,
                 legendgrouptitle_text=f"<b>{grp}</b>",
-                hovertemplate=(
-                    f"<b>{category}</b><br>"
-                    "Date: %{x|%b %Y}<br>"
-                    "Jobs: %{y:,.1f}K<extra></extra>"
-                )
+                # REMOVED Date and Category name from here
+                # Plotly will now show: [Color Dot] [Category Name]: [Value]
+                hovertemplate="%{y:,.1f}K<extra></extra>"
             ))
 
     # Dynamically extract the maximum year and month found in the actual data

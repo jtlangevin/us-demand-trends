@@ -4,6 +4,12 @@
 
 <br>
 
+### 🤝 Contributions
+* Fork the code and submit pull requests via [GitHub](https://github.com/jtlangevin/us-demand-trends).
+* Spot a problem with the results or have a request for an improvement? [Submit an issue](https://github.com/jtlangevin/us-demand-trends/issues).
+
+<br>
+
 <!-- * TOC
 {:toc} -->
 
@@ -137,10 +143,21 @@ To serve growing electricity demand and manage new technology operation at the g
 # Economic Growth and Competitiveness
 
 ### Buildings Jobs
-Buildings-related jobs – jobs to design, construct, operate, and retrofit buildings – are an important component of overall U.S. employment numbers. This chart shows the trend in buildings-related jobs over the past two decades.
+Buildings-related jobs – jobs to design, construct, operate, and retrofit buildings – are an important component of overall US employment numbers. This chart shows the trend in buildings-related jobs over the past two decades.
 
 <div align="center">
   <iframe src="graphics/building_jobs_trend.html" width="80%" height="880px" frameborder="0" scrolling="no"></iframe>
+</div>
+
+<hr style="border: 2px solid #333; margin: 30px 0;">
+
+
+### Exports of Buildings-related Products
+
+Buildings sector and other demand-side products are important players in US export markets. These charts demonstrate the magnitude of export markets for such products, the historical trends for those markets, and which countries the US is exporting the products to.
+
+<div align="center">
+  <iframe src="graphics/exports.html" width="80%" height="1350px" frameborder="0" scrolling="no"></iframe>
 </div>
 
 <hr style="border: 2px solid #333; margin: 30px 0;">
@@ -149,7 +166,7 @@ Buildings-related jobs – jobs to design, construct, operate, and retrofit buil
 Activities in commercial and residential buildings contribute substantially to U.S. gross domestic product (GDP). This chart shows the wedge of those contributions together with industrial/non-building activities over the past two decades.
 
 <div align="center">
-	<iframe src="graphics/gdp_contributions.html" width="80%" height="800px" frameborder="0"></iframe>
+	<iframe src="graphics/gdp_contributions.html" width="80%" height="880px" frameborder="0"></iframe>
 </div>
 <hr style="border: 2px solid #333; margin: 30px 0;">
 

@@ -28,6 +28,8 @@ import warnings
 import traceback
 from shapely.errors import ShapelyDeprecationWarning
 from dotenv import load_dotenv
+import time
+from datetime import datetime
 
 # Suppress geometry warnings for cleaner output
 warnings.filterwarnings("ignore", category=ShapelyDeprecationWarning)
@@ -2063,6 +2065,7 @@ def plot_building_jobs_trend(bls_key, output_dir):
 
     # Set the hovermode to 'x unified' to show one date at the top
     fig.update_layout(hovermode="x unified")
+    fig.update_xaxes(hoverformat="%b %Y")
 
     # We loop through the groups first so they appear organized in the legend
     for grp in df['Legend Group'].unique():
@@ -3082,6 +3085,291 @@ def plot_price_expend_benchmarks(output_dir):
         traceback.print_exc()
 
 
+def plot_exports(census_api_key, output_directory):
+    print("Plotting: US export trends and trading partners...")
+    if not os.path.exists(output_directory):
+        os.makedirs(output_directory)
+
+    # -------------------------------------------------------------------------
+    # DYNAMIC YEAR CONFIGURATION
+    # -------------------------------------------------------------------------
+    current_year = datetime.now().year
+    # Use the previous year to ensure a full 12 months of data is available
+    latest_year = str(current_year - 1)
+    # 4-year growth comparison
+    base_year = str(int(latest_year) - 4)
+    # 1. Configuration
+    trade_dictionary = {
+        "HVAC": ["841581", "841582", "841861"],
+        "Controls & Battery Storage": ["853710", "853720", "850760",
+                                       "850720", "850780"],
+        "Structure & Envelope": ["680610", "680690", "700800",
+                                 "730890", "441899"],
+        "PV & Transport": ["854143", "8541", "870380",
+                           "870340", "870360"],
+        "Computing Benchmarks": ["854231", "8542", "847150", "847130"]
+    }
+
+    product_labels = {
+        "841581": "Air-to-Air Heat Pumps", "841582": "Standard Central AC",
+        "841861": "Hydronic Heat Pumps", "853710": "Smart Building Controls",
+        "853720": "Grid/Building Switchgear", "850760": "Li-Ion Storage",
+        "850720": "Lead-Acid Backup", "850780": "Other Non-Lithium Storage",
+        "680610": "Mineral Insulation", "680690": "Other Insulation Mats",
+        "700800": "Insulating Glass", "730890": "Steel Structures",
+        "441899": "Wood Joinery", "854143": "Solar Panels (Finished)",
+        "8541": "Other Solar & Diodes", "870380": "EVs (Pure Electric)",
+        "870340": "Standard Hybrids", "870360": "Plug-in Hybrids",
+        "854231": "AI & Logic Chips", "8542": "Other Semiconductors",
+        "847150": "Data Center Servers", "847130": "Laptops & Portables"
+    }
+
+    subtraction_map = {"8541": "854143", "8542": "854231"}
+    codes_to_fetch = [c for sub in trade_dictionary.values() for c in sub]
+    trade_endpoint = "https://api.census.gov/data/timeseries/intltrade/exports/hs"
+
+    # -------------------------------------------------------------------------
+    # 2. PASS 1: Time-Series Data (Line Chart)
+    # -------------------------------------------------------------------------
+    print(" -> Fetching total US exports trend data...")
+    all_rows = []
+    for hs in codes_to_fetch:
+        params = {
+            "get": "ALL_VAL_MO,E_COMMODITY",
+            "E_COMMODITY": hs,
+            "COMM_LVL": f"HS{len(hs)}",
+            "time": "from 2013-01",
+            "key": census_api_key
+        }
+        try:
+            r = requests.get(trade_endpoint, params=params, timeout=15)
+            if r.status_code == 200:
+                data = r.json()
+                for row in data[1:]:
+                    all_rows.append({
+                        'Val': float(row[0]),
+                        'HS': str(row[1]),
+                        'Date': pd.to_datetime(row[4], format='%Y-%m')
+                    })
+            time.sleep(0.1)
+        except Exception as e:
+            print(f"Error on {hs}: {e}")
+
+    if not all_rows:
+        print("PIPELINE HALTED: No time-series data retrieved.")
+        return
+
+    df_ts = pd.DataFrame(all_rows)
+    df_piv = df_ts.pivot_table(index='Date', columns='HS',
+                               values='Val', aggfunc='sum').fillna(0)
+
+    for total, sub in subtraction_map.items():
+        if total in df_piv.columns and sub in df_piv.columns:
+            df_piv[total] = df_piv[total] - df_piv[sub]
+
+    df_clean = df_piv.reset_index().melt(
+        id_vars='Date', var_name='HS', value_name='Val'
+    )
+
+    final_list = []
+    for hs in df_clean['HS'].unique():
+        sub = df_clean[df_clean['HS'] == hs].sort_values('Date').copy()
+        sub['Smooth'] = sub['Val'].rolling(12).mean() / 1_000_000
+        final_list.append(sub)
+    df_plot_ts = pd.concat(final_list)
+
+    # -------------------------------------------------------------------------
+    # 3. PASS 2: Composition Data (Stacked Bars - Percentage Normalized)
+    # -------------------------------------------------------------------------
+    print(" -> Fetching country-specific data...")
+    comp_rows = []
+
+    comp_codes = {
+        "841581": "Air-to-Air Heat Pumps",
+        "853710": "Smart Building Controls",
+        "850760": "Li-Ion Storage",
+        "680610": "Mineral Insulation",
+        "700800": "Insulating Glass"
+    }
+
+    for hs, label in comp_codes.items():
+        for yr in [base_year, latest_year]:
+            params = {
+                "get": "ALL_VAL_MO,CTY_NAME,CTY_CODE",
+                "E_COMMODITY": hs, "CTY_CODE": "*",
+                "COMM_LVL": "HS6", "time": yr, "key": census_api_key
+            }
+            r = requests.get(trade_endpoint, params=params)
+            if r.status_code == 200:
+                data = r.json()
+                headers = data[0]
+                v_idx, n_idx, c_idx = (headers.index("ALL_VAL_MO"),
+                                       headers.index("CTY_NAME"),
+                                       headers.index("CTY_CODE"))
+                sums = {}
+                for row in data[1:]:
+                    code_str = str(row[c_idx])
+                    if not code_str.isdigit() or not (1000 <= int(code_str) <= 6999):
+                        continue
+                    v_raw = row[v_idx]
+                    v_f = float(v_raw) if v_raw not in [None, '-', ''] else 0.0
+                    sums[row[n_idx]] = sums.get(row[n_idx], 0) + v_f
+                for c_name, total in sums.items():
+                    comp_rows.append({"Label": label, "Year": yr,
+                                      "Value": total, "Country": c_name})
+
+    if not comp_rows:
+        print("❌ PIPELINE HALTED: No composition data retrieved.")
+        return
+
+    df_raw = pd.DataFrame(comp_rows)
+    df_pivot = df_raw.pivot_table(index=['Label', 'Country'], columns='Year',
+                                  values='Value', aggfunc='sum').reset_index().fillna(0)
+    df_pivot.columns = [str(c) for c in df_pivot.columns]
+
+    if base_year not in df_pivot.columns:
+        df_pivot[base_year] = 0.0
+    if latest_year not in df_pivot.columns:
+        df_pivot[latest_year] = 0.0
+
+    df_pivot['Change'] = df_pivot[latest_year] - df_pivot[base_year]
+
+    # -------------------------------------------------------------------------
+    # PERCENTAGE MATH & EXPLICIT LOOPING
+    # -------------------------------------------------------------------------
+    final_bar_rows = []
+    for label in df_pivot['Label'].unique():
+        df_sub = df_pivot[df_pivot['Label'] == label].sort_values(
+            latest_year, ascending=False
+        )
+        # Calculate totals for the denominator
+        total_base = df_sub[base_year].sum()
+        total_latest = df_sub[latest_year].sum()
+
+        # Prevent division by zero
+        div_base = total_base if total_base > 0 else 1
+        div_latest = total_latest if total_latest > 0 else 1
+
+        top_5 = df_sub.head(5)
+        for _, row in top_5.iterrows():
+            row_dict = row.to_dict()
+            row_dict['Share_Latest'] = (row[latest_year] / div_latest) * 100
+            row_dict['Growth_Contrib'] = (row['Change'] / div_base) * 100
+            final_bar_rows.append(row_dict)
+
+        others_df = df_sub.iloc[5:]
+        if not others_df.empty:
+            o_base = others_df[base_year].sum()
+            o_latest = others_df[latest_year].sum()
+            o_change = others_df['Change'].sum()
+
+            final_bar_rows.append({
+                'Label': label, 'Country': 'All Other',
+                base_year: o_base, latest_year: o_latest, 'Change': o_change,
+                'Share_Latest': (o_latest / div_latest) * 100,
+                'Growth_Contrib': (o_change / div_base) * 100
+            })
+
+    df_bar = pd.DataFrame(final_bar_rows)
+
+    # -------------------------------------------------------------------------
+    # 4. Integrated Plotting
+    # -------------------------------------------------------------------------
+    fig = make_subplots(
+        rows=2, cols=2, specs=[[{"colspan": 2}, None], [{}, {}]],
+        vertical_spacing=0.12, row_heights=[0.65, 0.35],
+        subplot_titles=((
+            "Monthly Value by Export Category<br>"
+            "<sup>Source: Census U.S. Exports of Goods</sup>"), (
+            f"% of {latest_year} Total<br>"
+            "<sup>Source: Census U.S. Exports of Goods</sup>"), (
+            f"% Growth, {base_year}-{latest_year}<br>"
+            "<sup>Source: Census U.S. Exports of Goods</sup>"))
+    )
+
+    # A. Line Chart Traces (Legend 1)
+    line_palette = px.colors.qualitative.Alphabet
+    all_hs_list = [c for sub in trade_dictionary.values() for c in sub]
+
+    for grp_name, hs_list in trade_dictionary.items():
+        for hs in hs_list:
+            d = df_plot_ts[(df_plot_ts['HS'] == hs) &
+                           (df_plot_ts['Date'] >= '2014-01-01')]
+            if not d.empty:
+                c_idx = all_hs_list.index(hs) % len(line_palette)
+                fig.add_trace(go.Scatter(
+                    x=d['Date'], y=d['Smooth'],
+                    name=product_labels.get(hs, hs),
+                    line=dict(width=2.5, color=line_palette[c_idx]),
+                    legendgroup=grp_name,
+                    legendgrouptitle_text=f"<b>{grp_name}</b>",
+                    hovertemplate="<b>%{fullData.name}</b><br>$%{y:,.1f}M<extra></extra>",
+                    legend="legend"
+                ), row=1, col=1)
+
+    # B. Bar Chart Traces (Legend 2 - Percentages)
+    bar_colors = px.colors.qualitative.Prism
+    u_countries = df_bar['Country'].unique()
+    sorted_countries = [c for c in u_countries if c != 'All Other'] + ['All Other']
+
+    for idx, country in enumerate(sorted_countries):
+        c_sub = df_bar[df_bar['Country'] == country]
+        color = ('rgb(180,180,180)' if country == 'All Other'
+                 else bar_colors[idx % len(bar_colors)])
+
+        # Market Share Panel
+        fig.add_trace(go.Bar(
+            name=country, x=c_sub['Label'], y=c_sub['Share_Latest'],
+            marker_color=color, legend="legend2",
+            hovertemplate="<b>" + country + "</b><br>Share: %{y:.1f}%<extra></extra>"
+        ), row=2, col=1)
+
+        # Growth Contribution Panel
+        fig.add_trace(go.Bar(
+            name=country, x=c_sub['Label'], y=c_sub['Growth_Contrib'],
+            marker_color=color, showlegend=False, legend="legend2",
+            hovertemplate="<b>" + country + "</b><br>Added to Growth: %{y:.1f}%<extra></extra>"
+        ), row=2, col=2)
+
+    # 5. Layout & UI
+    fig.update_layout(
+        template="plotly_white", height=1300, barmode='relative',
+        hovermode="x unified",
+        legend=dict(
+            groupclick="toggleitem", traceorder="grouped",
+            yanchor="top", y=1.0, xanchor="left", x=1.02
+        ),
+        legend2=dict(
+            title="<b>Country</b>", traceorder="normal",
+            yanchor="top", y=0.32, xanchor="left", x=1.02
+        )
+    )
+
+    fig.update_yaxes(title_text="Value ($M, 12-Mo. Avg.)", row=1, col=1)
+    fig.update_yaxes(title_text="% of Total Export Market", row=2, col=1)
+    fig.update_yaxes(title_text="% Growth", row=2, col=2)
+
+    # Explicitly set the x-axis category order for the bottom panels
+    custom_x_order = [
+        "Air-to-Air Heat Pumps",
+        "Insulating Glass",
+        "Mineral Insulation",
+        "Smart Building Controls",
+        "Li-Ion Storage"
+    ]
+
+    fig.update_xaxes(
+        categoryorder='array', categoryarray=custom_x_order, row=2, col=1
+    )
+    fig.update_xaxes(
+        categoryorder='array', categoryarray=custom_x_order, row=2, col=2
+    )
+
+    output_file = f"{output_directory}/exports.html"
+    fig.write_html(output_file)
+    print(f"Exports HTML complete: {output_file}")
+
+
 def find_latest_eia_861_year():
     """Finds the latest available EIA-861 data year by checking zip urls."""
     year = pd.Timestamp.now().year
@@ -3140,6 +3428,7 @@ def main():
         plot_ferc_load_growth_forecasts(output_dir)
         plot_insurance_costs(output_dir)
         plot_price_expend_benchmarks(output_dir)
+        plot_exports(census_key, output_dir)
 
         print(f"\nPipeline complete. Visuals saved to ./{output_dir}")
     except Exception as e:

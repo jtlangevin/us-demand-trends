@@ -1,4 +1,4 @@
-name: Quarterly Energy Data Update
+name: Energy Data Update
 
 on:
   schedule:

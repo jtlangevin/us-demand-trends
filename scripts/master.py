@@ -34,6 +34,8 @@ from datetime import datetime
 # Suppress geometry warnings for cleaner output
 warnings.filterwarnings("ignore", category=ShapelyDeprecationWarning)
 warnings.filterwarnings("ignore", message=".*Geometry is in a geographic CRS.*")
+# Silence openpyxl's complaints about Census Excel print formatting
+warnings.filterwarnings('ignore', category=UserWarning, module='openpyxl')
 
 
 # ==========================================
@@ -394,15 +396,74 @@ def plot_fuel_price_ratio(eia_key, output_dir):
     print(f" -> Success! Fuel price HTML saved to {html_maps_path}")
 
 
-def plot_permits_construction(census_key, output_dir):
-    """Permits, construction cost maps, and detailed cost breakdown."""
-    print("Plotting: Housing permits and construction costs (Census BPS)...")
+def fetch_and_clean_census_regions():
+    """Helper: Fetches and parses the live Census SOC Excel files."""
+    print(" -> Downloading live SOC duration tables from Census...")
+    url_a = "https://www.census.gov/construction/nrc/xls/avg_authtostart_cust.xlsx"
+    url_c = "https://www.census.gov/construction/nrc/xls/avg_starttocomp_cust.xlsx"
+    headers = {'User-Agent': 'Mozilla/5.0'}
 
-    # 1. LOAD GEOJSON
-    geojson_url = (
-        'https://raw.githubusercontent.com/plotly/datasets/master/'
-        'geojson-counties-fips.json'
-    )
+    try:
+        r_auth = requests.get(url_a, headers=headers, timeout=15)
+        r_comp = requests.get(url_c, headers=headers, timeout=15)
+        r_auth.raise_for_status()
+        r_comp.raise_for_status()
+    except Exception as e:
+        print(f"❌ Failed to fetch Census SOC files: {e}")
+        return None
+
+    regions = {1: "Northeast", 2: "Midwest", 3: "South", 4: "West"}
+    master_data = {}
+    reporting_year = 0
+
+    def extract_metrics(excel_bytes, sheet_index):
+        df = pd.read_excel(
+            io.BytesIO(excel_bytes),
+            sheet_name=sheet_index,
+            header=None
+        )
+        latest_year = 0
+        val_sf, val_mf = 0.0, 0.0
+
+        for _, row in df.iterrows():
+            col_val = str(row[0]).strip()
+            if col_val.isdigit() and len(col_val) == 4:
+                year = int(col_val)
+                if year > latest_year:
+                    latest_year = year
+                    val_sf = pd.to_numeric(row[1], errors='coerce')
+                    val_mf = pd.to_numeric(row[5], errors='coerce')
+        return val_sf, val_mf, latest_year
+
+    for sheet_idx, region_name in regions.items():
+        auth_sf, auth_mf, auth_year = extract_metrics(
+            r_auth.content, sheet_idx
+        )
+        comp_sf, comp_mf, comp_year = extract_metrics(
+            r_comp.content, sheet_idx
+        )
+        reporting_year = max(reporting_year, auth_year, comp_year)
+
+        master_data[region_name] = {
+            "SF_Auth": auth_sf if pd.notna(auth_sf) else 0.0,
+            "MF_Auth": auth_mf if pd.notna(auth_mf) else 0.0,
+            "SF_Build": comp_sf if pd.notna(comp_sf) else 0.0,
+            "MF_Build": comp_mf if pd.notna(comp_mf) else 0.0
+        }
+
+    return master_data, list(regions.values()), reporting_year
+
+
+def plot_permits_construction(census_key, output_dir):
+    """Permits, cost maps, detailed cost breakdown, and build duration."""
+    print("Plotting: Housing permits and costs (Census BPS/SOC)...")
+
+    # ==========================================
+    # 1. LOAD MAP DATA (GeoJSON, BPS, Pop)
+    # ==========================================
+    base_url = 'https://raw.githubusercontent.com/plotly/datasets/master/'
+    geojson_url = f'{base_url}geojson-counties-fips.json'
+
     try:
         with urlopen(geojson_url) as response:
             counties = json.load(response)
@@ -410,32 +471,29 @@ def plot_permits_construction(census_key, output_dir):
         print(f"\n[WARNING] Failed to download county GeoJSON. Error: {e}")
         return
 
-    # 2. LOAD BPS DATA (Map data)
-    # Start searching from the actual current calendar year
     target_year = pd.Timestamp.now().year
     success_bps = False
 
     while target_year >= 2020:
-        year_str = str(target_year)[-2:]
-        # 'a' suffix is annual, '12y' is year-to-date through December
-        url_a = f"https://www2.census.gov/econ/bps/County/co{year_str}a.txt"
-        url_y = f"https://www2.census.gov/econ/bps/County/co{year_str}12y.txt"
+        yr_str = str(target_year)[-2:]
+        url_a = f"https://www2.census.gov/econ/bps/County/co{yr_str}a.txt"
+        url_y = f"https://www2.census.gov/econ/bps/County/co{yr_str}12y.txt"
 
         for url in [url_a, url_y]:
             try:
-                # We use a short timeout so the "search" through years is fast
                 df = pd.read_csv(
-                    url, dtype=str, on_bad_lines='skip', storage_options={'timeout': 10})
+                    url, dtype=str, on_bad_lines='skip',
+                    storage_options={'timeout': 10}
+                )
                 if len(df) > 1000:
                     print(f" -> Success! Found BPS data for {target_year}.")
                     success_bps = True
                     break
             except Exception:
                 pass
+
         if success_bps:
             break
-
-        # If 2026 isn't out, try 2025; if 2025 isn't out, try 2024, etc.
         target_year -= 1
 
     if not success_bps:
@@ -450,16 +508,12 @@ def plot_permits_construction(census_key, output_dir):
     df['Value'] = pd.to_numeric(df['Value'], errors='coerce').fillna(0)
     df = df[pd.to_numeric(df['SF'], errors='coerce') < 60]
 
-    # 3. LOAD POPULATION DATA (Map data)
     pop_year = target_year
     success_pop = False
+
     while pop_year >= 2020:
         p_url = f"https://api.census.gov/data/{pop_year}/acs/acs5"
-        p_params = {
-            "get": "B01003_001E",
-            "for": "county:*",
-            "key": census_key
-        }
+        p_params = {"get": "B01003_001E", "for": "county:*", "key": census_key}
         try:
             resp = requests.get(p_url, params=p_params, timeout=15)
             if resp.status_code == 200:
@@ -486,22 +540,20 @@ def plot_permits_construction(census_key, output_dir):
         '09170': '09009', '09180': '09011', '09190': '09001'
     }
     df_m['FIPS'] = df_m['FIPS'].replace(ct_crosswalk)
-    df_m = df_m.groupby('FIPS', as_index=False).agg({
-        'Name': 'first',
-        'Units': 'sum',
-        'Value': 'sum',
-        'Population': 'sum'
-    })
+    df_m = df_m.groupby('FIPS', as_index=False).agg(
+        {'Name': 'first', 'Units': 'sum', 'Value': 'sum', 'Population': 'sum'}
+    )
 
     df_v = df_m[(df_m['Population'] > 0) & (df_m['Units'] > 0)].copy()
     df_v['Permits_1k'] = (df_v['Units'] / df_v['Population']) * 1000
     df_v['Cost'] = df_v['Value'] / df_v['Units']
-
     max_p = df_v['Permits_1k'].quantile(0.95)
     min_c = df_v['Cost'].min()
     max_c = df_v['Cost'].quantile(0.95)
 
-    # 4. LOAD COST BREAKDOWN DATA (Bar Chart Data)
+    # ==========================================
+    # 2. LOAD NAHB COST BREAKDOWN DATA
+    # ==========================================
     try:
         df_full = pd.read_csv('input_data/cost_comps_full.csv')
         df_overhead = pd.read_csv('input_data/cost_comps_overhead.csv')
@@ -517,12 +569,9 @@ def plot_permits_construction(census_key, output_dir):
     def get_clean_label(label):
         label = re.sub(r'^[A-Z]+\.\s*', '', label)
         label = re.sub(r'^[IVX]+\.\s*', '', label)
-        label = re.sub(r'\s*\(.*\)', '', label)
-        return label.strip()
+        return re.sub(r'\s*\(.*\)', '', label).strip()
 
-    row_b = df_overhead.iloc[1]
-    cost_const = get_clean_cost(row_b.iloc[5])
-
+    cost_const = get_clean_cost(df_overhead.iloc[1].iloc[5])
     non_const_indices = [0, 2, 3, 4, 5, 6]
     cost_non_const = sum([
         get_clean_cost(df_overhead.iloc[i].iloc[5])
@@ -530,38 +579,42 @@ def plot_permits_construction(census_key, output_dir):
     ])
 
     df1 = pd.DataFrame([
-        {'Label': 'Total Construction Costs', 'Cost': cost_const,
-         'Group': 'Const'},
-        {'Label': 'Non-Construction Costs', 'Cost': cost_non_const,
-         'Group': 'Non-Const'}
-    ])
-    df1 = df1.sort_values('Cost', ascending=False)
+        {
+            'Label': 'Total Construction Costs',
+            'Cost': cost_const,
+            'Group': 'Const'
+        },
+        {
+            'Label': 'Non-Construction Costs',
+            'Cost': cost_non_const,
+            'Group': 'Non-Const'
+        }
+    ]).sort_values('Cost', ascending=False)
 
     const_indices = [0, 6, 9, 15, 20, 25, 37, 43]
     const_sub = []
     for i in const_indices:
         row = df_full.iloc[i]
-        c_val = get_clean_cost(row.iloc[5])
-        c_label = get_clean_label(row.iloc[0])
-        const_sub.append({'Label': c_label, 'Cost': c_val, 'Group': 'Const'})
+        const_sub.append({
+            'Label': get_clean_label(row.iloc[0]),
+            'Cost': get_clean_cost(row.iloc[5]),
+            'Group': 'Const'
+        })
 
     non_const_sub = []
     for i in non_const_indices:
         row = df_overhead.iloc[i]
-        c_val = get_clean_cost(row.iloc[5])
-        c_label = get_clean_label(row.iloc[0])
         non_const_sub.append({
-            'Label': c_label, 'Cost': c_val, 'Group': 'Non-Const'
+            'Label': get_clean_label(row.iloc[0]),
+            'Cost': get_clean_cost(row.iloc[5]),
+            'Group': 'Non-Const'
         })
 
     df2 = pd.DataFrame(const_sub + non_const_sub)
-    df2_const = df2[df2['Group'] == 'Const'].sort_values(
-        'Cost', ascending=False
-    )
-    df2_non = df2[df2['Group'] == 'Non-Const'].sort_values(
-        'Cost', ascending=False
-    )
-    df2_sorted = pd.concat([df2_const, df2_non])
+    df2_sorted = pd.concat([
+        df2[df2['Group'] == 'Const'].sort_values('Cost', ascending=False),
+        df2[df2['Group'] == 'Non-Const'].sort_values('Cost', ascending=False)
+    ])
 
     total_price = cost_const + cost_non_const
 
@@ -569,8 +622,8 @@ def plot_permits_construction(census_key, output_dir):
         df_source['Percent'] = df_source['Cost'] / total * 100
         df_source['LegendLabel'] = df_source.apply(
             lambda x: (
-                f"{x['Label']} "
-                f"(${x['Cost']/1000:.0f}K - {x['Percent']:.0f}%)"
+                f"{x['Label']} (${x['Cost']/1000:.0f}K - "
+                f"{x['Percent']:.0f}%)"
             ),
             axis=1
         )
@@ -579,42 +632,67 @@ def plot_permits_construction(census_key, output_dir):
     df1 = add_legend_labels(df1, total_price)
     df2_sorted = add_legend_labels(df2_sorted, total_price)
 
-    # Use Matplotlib to generate our color ramps
     cmap_red = plt.get_cmap('Reds')
+    cmap_blue = plt.get_cmap('Blues')
+
     reds = [
         mcolors.to_hex(cmap_red(x))
-        for x in np.linspace(0.4, 0.9, len(df2_const))
+        for x in np.linspace(0.4, 0.9, len(df2[df2['Group'] == 'Const']))
     ]
-    cmap_blue = plt.get_cmap('Blues')
     blues = [
         mcolors.to_hex(cmap_blue(x))
-        for x in np.linspace(0.4, 0.9, len(df2_non))
+        for x in np.linspace(0.4, 0.9, len(df2[df2['Group'] == 'Non-Const']))
     ]
     df2_sorted['Color'] = reds + blues
 
     # ==========================================
-    # 5. BUILD DASHBOARD
+    # 3. LOAD CENSUS SOC DURATION DATA
+    # ==========================================
+    parsed_soc = fetch_and_clean_census_regions()
+    if parsed_soc:
+        soc_data, regions_list, soc_year = parsed_soc
+        x_soc = [
+            [reg for reg in regions_list for _ in range(2)],
+            ["Single-<br>Family", "Multi-<br>Family"] * len(regions_list)
+        ]
+
+        y_soc_auth = []
+        y_soc_build = []
+        for reg in regions_list:
+            y_soc_auth.extend([
+                soc_data[reg]["SF_Auth"], soc_data[reg]["MF_Auth"]
+            ])
+            y_soc_build.extend([
+                soc_data[reg]["SF_Build"], soc_data[reg]["MF_Build"]
+            ])
+    else:
+        soc_year = "Data Unavailable"
+
+    # ==========================================
+    # 4. BUILD DASHBOARD
     # ==========================================
     fig = make_subplots(
         rows=2, cols=2,
         row_heights=[0.6, 0.4],
-        vertical_spacing=0.08,
-        horizontal_spacing=0.05,  # <-- This pulls the maps right next to each other
+        vertical_spacing=0.12,
+        horizontal_spacing=0.08,
         specs=[
             [{'type': 'choropleth'}, {'type': 'choropleth'}],
-            [{'type': 'bar', 'colspan': 2}, None]
+            [{'type': 'bar'}, {'type': 'bar'}]
         ],
         subplot_titles=(
-            (f"New Housing Permits, {target_year}<br>"
-             "<sup>Source: Census BPS</sup>"),
-            (f"New Housing Construction Cost, {target_year}<br>"
-             "<sup>Source: Census BPS</sup>"),
-            ("Typical New Single Family Home: Sale Price Breakdown, 2024<br>"
-             "<sup>Source: NAHB</sup><br>")
+            f"New Housing Permits, {target_year}<br>"
+            "<sup>Source: Census BPS</sup>",
+            f"New Housing Construction Cost, {target_year}<br>"
+            "<sup>Source: Census BPS</sup>",
+            f"Average Build Duration by Region, {soc_year}<br>"
+            "<sup>Source: Census SOC</sup>",
+            "Typical New Single Family Home: Sale Price Breakdown, 2024<br>"
+            "<sup>Source: NAHB</sup>"
         )
     )
 
-    # --- MAPS ---
+    # --- MAPS (Row 1) ---
     fig.add_trace(
         go.Choropleth(
             geojson=counties, locations=df_v['FIPS'],
@@ -643,70 +721,145 @@ def plot_permits_construction(census_key, output_dir):
         ), row=1, col=2
     )
 
-    # --- BAR CHART ---
+    # --- DURATION BAR CHART (Row 2, Col 1 - FLIPPED) ---
+    if parsed_soc:
+        # Calculate the totals for the data labels
+        y_soc_total = [a + b for a, b in zip(y_soc_auth, y_soc_build)]
+        max_duration = max(y_soc_total) if y_soc_total else 20
+
+        fig.add_trace(
+            go.Bar(
+                x=x_soc, y=y_soc_auth,
+                name="Permit to Start", marker_color="#F6B26B",
+                hovertemplate=(
+                    "%{x[0]} - %{x[1]}<br>"
+                    "<b>Permit to Start:</b> %{y} Months<extra></extra>"
+                ),
+                legend="legend2"
+            ), row=2, col=1
+        )
+
+        fig.add_trace(
+            go.Bar(
+                x=x_soc, y=y_soc_build,
+                name="Start to Completion", marker_color="#3D85C6",
+                text=[f"{val:.1f}" for val in y_soc_total],  # Provide the totals
+                textposition="outside",                      # Place them on top
+                textfont=dict(size=10, color="black"),       # Styling
+                hovertemplate=(
+                    "%{x[0]} - %{x[1]}<br>"
+                    "<b>Start to Completion:</b> %{y} Months<extra></extra>"
+                ),
+                legend="legend2"
+            ), row=2, col=1
+        )
+
+    # --- COST BAR CHART (Row 2, Col 2 - FLIPPED) ---
     colors1 = {
         'Total Construction Costs': '#E57373',
         'Non-Construction Costs': '#64B5F6'
     }
 
-    # Add High Level Bar
     for _, row in df1.iterrows():
-        fig.add_trace(go.Bar(
-            x=[row['Cost']], y=['High Level'],
-            name=row['LegendLabel'], orientation='h',
-            marker=dict(color=colors1.get(row['Label'], '#E57373')),
-            legendgroup='High Level',
-            legendgrouptitle_text='High Level Summary',
-            hovertemplate=(
-                f"<b>{row['Label']}</b><br>"
-                f"Cost: ${row['Cost']/1000:.0f}K<br>"
-                f"Share: {row['Percent']:.1f}%<extra></extra>"
-            )
-        ), row=2, col=1)
+        fig.add_trace(
+            go.Bar(
+                x=[row['Cost']], y=['High Level'],
+                name=row['LegendLabel'], orientation='h',
+                marker=dict(color=colors1.get(row['Label'], '#E57373')),
+                legendgroup='High Level',
+                hovertemplate=(
+                    f"<b>{row['Label']}</b><br>"
+                    f"Cost: ${row['Cost']/1000:.0f}K<br>"
+                    f"Share: {row['Percent']:.1f}%<extra></extra>"
+                ),
+                legend="legend"
+            ), row=2, col=2
+        )
 
-    # Add Detailed Bar
     for _, row in df2_sorted.iterrows():
-        fig.add_trace(go.Bar(
-            x=[row['Cost']], y=['Detailed'],
-            name=row['LegendLabel'], orientation='h',
-            marker=dict(color=row['Color']),
-            legendgroup='Detailed Breakdown',
-            legendgrouptitle_text='Detailed Breakdown',
-            hovertemplate=(
-                f"<b>{row['Label']}</b><br>"
-                f"Cost: ${row['Cost']/1000:.0f}K<br>"
-                f"Share: {row['Percent']:.1f}%<extra></extra>"
-            )
-        ), row=2, col=1)
+        fig.add_trace(
+            go.Bar(
+                x=[row['Cost']], y=['Detailed'],
+                name=row['LegendLabel'], orientation='h',
+                marker=dict(color=row['Color']),
+                legendgroup='Detailed Breakdown',
+                hovertemplate=(
+                    f"<b>{row['Label']}</b><br>"
+                    f"Cost: ${row['Cost']/1000:.0f}K<br>"
+                    f"Share: {row['Percent']:.1f}%<extra></extra>"
+                ),
+                legend="legend"
+            ), row=2, col=2
+        )
 
     # --- LAYOUT & STYLING ---
     fig.update_layout(
-        height=1400,
-        barmode='stack',
+        height=1400, barmode='stack',
         geo=dict(scope='usa', projection_type='albers usa'),
         geo2=dict(scope='usa', projection_type='albers usa'),
-        margin={"r": 20, "t": 60, "l": 20, "b": 100},
+        margin={"r": 20, "t": 60, "l": 20, "b": 150},
+
+        # NAHB Legend (Anchored under the right-side plot)
         legend=dict(
-            orientation="h", yanchor="top", y=-0.05,
-            xanchor="center", x=0.5,
-            groupclick="toggleitem"
+            orientation="h", yanchor="top", y=-0.12,
+            xanchor="right", x=1.0,
+            groupclick="toggleitem",
+            title_text="<b>Cost Components</b>"
+        ),
+
+        # SOC Duration Legend (Anchored under the left-side plot)
+        legend2=dict(
+            orientation="h", yanchor="top", y=-0.12,
+            xanchor="left", x=0.0,
+            title_text="<b>Build Phase</b>"
         )
     )
 
-    # Force order of categorical y-axis, add HTML spaces instead of tickpad
     fig.update_yaxes(
         categoryorder='array',
         categoryarray=['Detailed', 'High Level'],
-        ticksuffix="&nbsp;&nbsp;&nbsp;&nbsp;",  # Pushes text left using spaces
-        row=2, col=1
+        ticksuffix="&nbsp;&nbsp;&nbsp;&nbsp;",
+        row=2, col=2
+    )
+
+    # Adjust domain distributions:
+    # Col 1 (Duration) gets ~35%, Col 2 (Costs) gets ~55% to fit large text
+    fig.update_xaxes(
+        domain=[0.0, 0.35], tickangle=0, row=2, col=1
     )
     fig.update_xaxes(
-        domain=[0.15, 0.85],
+        domain=[0.45, 1.0], row=2, col=2
+    )
+
+    # Set the range dynamically to leave 15% headroom for the new text labels
+    fig.update_yaxes(
+        title_text="Total Duration (Months)",
+        dtick=4,
+        range=[0, max_duration * 1.15] if parsed_soc else None,
         row=2, col=1
     )
 
+    # make_subplots generates annotations for titles in order:
+    # [0]: Top Left, [1]: Top Right, [2]: Bottom Left, [3]: Bottom Right
+    annotations = list(fig.layout.annotations)
+
+    # Move Bottom Left title to the center of domain [0.0, 0.35]
+    annotations[2].x = 0.175
+
+    # Move Bottom Right title to the center of domain [0.45, 1.0]
+    annotations[3].x = 0.725
+
+    fig.update_layout(annotations=annotations)
+    # -------------------------------------
+
+    # Ensure output directory exists before saving
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+
     html_maps_path = f"{output_dir}/permits_construction_costs.html"
-    fig.write_html(html_maps_path, default_width='95%', default_height='100%')
+    fig.write_html(
+        html_maps_path, default_width='95%', default_height='100%'
+    )
     print(f" -> Success! Construction HTML saved to {html_maps_path}")
 
 
@@ -3414,21 +3567,21 @@ def main():
         os.makedirs(output_dir)
 
     try:
-        latest_eia_year = find_latest_eia_861_year()
-        plot_energy_burden(output_dir)
-        plot_fuel_price_ratio(eia_key, output_dir)
+        # latest_eia_year = find_latest_eia_861_year()
+        # plot_energy_burden(output_dir)
+        # plot_fuel_price_ratio(eia_key, output_dir)
         plot_permits_construction(census_key, output_dir)
-        plot_county_heating_equipment(census_key, output_dir)
-        plot_ann_elec_sales(output_dir)
-        plot_peak_data(output_dir)
-        plot_utility_costs(latest_eia_year, output_dir)
-        plot_dsm_comprehensive_dashboard(latest_eia_year, output_dir)
-        plot_building_jobs_trend(bls_key, output_dir)
-        plot_gdp_by_building_type(bea_key, output_dir)
-        plot_ferc_load_growth_forecasts(output_dir)
-        plot_insurance_costs(output_dir)
-        plot_price_expend_benchmarks(output_dir)
-        plot_exports(census_key, output_dir)
+        # plot_county_heating_equipment(census_key, output_dir)
+        # plot_ann_elec_sales(output_dir)
+        # plot_peak_data(output_dir)
+        # plot_utility_costs(latest_eia_year, output_dir)
+        # plot_dsm_comprehensive_dashboard(latest_eia_year, output_dir)
+        # plot_building_jobs_trend(bls_key, output_dir)
+        # plot_gdp_by_building_type(bea_key, output_dir)
+        # plot_ferc_load_growth_forecasts(output_dir)
+        # plot_insurance_costs(output_dir)
+        # plot_price_expend_benchmarks(output_dir)
+        # plot_exports(census_key, output_dir)
 
         print(f"\nPipeline complete. Visuals saved to ./{output_dir}")
     except Exception as e:

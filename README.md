@@ -53,7 +53,7 @@
 # Affordability
 
 ### Housing Construction
-This dashboard visualizes the speed and cost of new housing development at the county level, illustrating the regions where new housing is growing the fastest and/or housing construction costs are the lowest.
+This dashboard visualizes the speed and cost of new housing development at the county level, illustrating the regions where new housing is growing the fastest and/or housing construction costs are the lowest, while also indicating the typical time it takes to construct single and multi family housing.
 
 <iframe src="graphics/permits_construction_costs.html" width="100%" height="1450px" frameborder="0" scrolling="no"></iframe>
 

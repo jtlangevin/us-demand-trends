@@ -2148,54 +2148,61 @@ def plot_building_jobs_trend(bls_key, output_dir):
         '#6b6ecf', '#9c9ede'
     ]
 
-    # We now have exactly 14 valid series, so we use range(14)
-    color_dict = {list(group_map.keys())[i]: colors[i] for i in range(14)}
+    # Exactly 14 valid series mapped to colors
+    keys_list = list(group_map.keys())
+    color_dict = {keys_list[i]: colors[i] for i in range(14)}
 
     headers = {'Content-type': 'application/json'}
     current_year = pd.Timestamp.now().year
-    data = json.dumps({
-        "seriesid": list(series_map.keys()),
-        "startyear": "2005",
-        "endyear": str(current_year),
-        "registrationkey": bls_key
-    })
-
-    try:
-        url = 'https://api.bls.gov/publicAPI/v2/timeseries/data/'
-        req = requests.post(url, data=data, headers=headers, timeout=30)
-        req.raise_for_status()
-        json_data = req.json()
-    except Exception as e:
-        print(f"\n[WARNING] BLS API fetch failed: {e}")
-        return
-
-    if json_data.get('status') != 'REQUEST_SUCCEEDED':
-        err = json_data.get('message')
-        print(f"\n[WARNING] BLS API Error: {err}")
-        return
+    start_year = 2005
 
     records = []
-    for series in json_data['Results']['series']:
-        series_id = series['seriesID']
-        series_name = series_map.get(series_id, series_id)
+    # --- THE FIX: Chunk requests into 10-year blocks to avoid BLS limits ---
+    for chunk_start in range(start_year, current_year + 1, 10):
+        chunk_end = min(chunk_start + 9, current_year)
+        print(f" -> Fetching BLS data: {chunk_start} to {chunk_end}...")
+        data = json.dumps({
+            "seriesid": list(series_map.keys()),
+            "startyear": str(chunk_start),
+            "endyear": str(chunk_end),
+            "registrationkey": bls_key
+        })
 
-        for item in series['data']:
-            year = item['year']
-            period = item['period']
+        try:
+            url = 'https://api.bls.gov/publicAPI/v2/timeseries/data/'
+            req = requests.post(url, data=data, headers=headers, timeout=30)
+            req.raise_for_status()
+            json_data = req.json()
+        except Exception as e:
+            print(f"\n[WARNING] BLS API fetch failed ({chunk_start}): {e}")
+            continue  # Move to the next chunk instead of killing the script
 
-            if period == 'M13':
-                continue
+        if json_data.get('status') != 'REQUEST_SUCCEEDED':
+            err = json_data.get('message')
+            print(f"\n[WARNING] BLS API Error ({chunk_start}): {err}")
+            continue
 
-            value = float(item['value'])
-            month = period.replace('M', '')
-            date_str = f"{year}-{month}-01"
+        for series in json_data['Results']['series']:
+            series_id = series['seriesID']
+            series_name = series_map.get(series_id, series_id)
 
-            records.append({
-                'Date': date_str,
-                'Job Category': series_name,
-                'Legend Group': group_map.get(series_name, 'Other'),
-                'Employees (Thousands)': value
-            })
+            for item in series['data']:
+                period = item['period']
+
+                if period == 'M13':
+                    continue
+
+                year = item['year']
+                value = float(item['value'])
+                month = period.replace('M', '').zfill(2)
+                date_str = f"{year}-{month}-01"
+
+                records.append({
+                    'Date': date_str,
+                    'Job Category': series_name,
+                    'Legend Group': group_map.get(series_name, 'Other'),
+                    'Employees (Thousands)': value
+                })
 
     df = pd.DataFrame(records)
     if df.empty:
@@ -2205,7 +2212,7 @@ def plot_building_jobs_trend(bls_key, output_dir):
     df['Date'] = pd.to_datetime(df['Date'])
     df = df.sort_values(['Job Category', 'Date'])
 
-    # Apply 12-month rolling average to de-seasonalize the unadjusted data
+    # Apply 12-month rolling avg to de-seasonalize unadjusted data
     df['Smoothed Jobs'] = df.groupby('Job Category')[
         'Employees (Thousands)'
     ].transform(lambda x: x.rolling(12, min_periods=1).mean())
@@ -2215,14 +2222,13 @@ def plot_building_jobs_trend(bls_key, output_dir):
 
     # Build the Plotly line chart
     fig = go.Figure()
-
-    # Set the hovermode to 'x unified' to show one date at the top
     fig.update_layout(hovermode="x unified")
     fig.update_xaxes(hoverformat="%b %Y")
 
-    # We loop through the groups first so they appear organized in the legend
+    # Loop through groups first so they appear organized in the legend/tooltip
     for grp in df['Legend Group'].unique():
         df_group = df[df['Legend Group'] == grp]
+
         for category in df_group['Job Category'].unique():
             df_cat = df_group[df_group['Job Category'] == category]
             fig.add_trace(go.Scatter(
@@ -2233,15 +2239,14 @@ def plot_building_jobs_trend(bls_key, output_dir):
                 line=dict(width=2, color=color_dict.get(category)),
                 legendgroup=grp,
                 legendgrouptitle_text=f"<b>{grp}</b>",
-                # REMOVED Date and Category name from here
-                # Plotly will now show: [Color Dot] [Category Name]: [Value]
-                hovertemplate="%{y:,.1f}K<extra></extra>"
+                # --- THE FIX: Clean, minimalist unified tooltip ---
+                hovertemplate="%{y:,.1f}k<extra></extra>"
             ))
 
-    # Dynamically extract the maximum year and month found in the actual data
+    # Dynamically extract max year and month
     max_date = df['Date'].max()
     max_year = max_date.year
-    max_month_name = max_date.strftime('%B')  # e.g., "December"
+    max_month_name = max_date.strftime('%B')
 
     fig.update_layout(
         title=(
@@ -2253,17 +2258,17 @@ def plot_building_jobs_trend(bls_key, output_dir):
         yaxis_title="Total Employees (Thousands)",
         template="plotly_white",
         legend=dict(
-            orientation="v",  # Switched to vertical because of the 5 groups
-            yanchor="top",
-            y=1.0,
-            xanchor="left",
-            x=1.02,           # Placed to the right of the plot
+            orientation="v",
+            yanchor="top", y=1.0,
+            xanchor="left", x=1.02,
             groupclick="toggleitem"
         ),
-        hovermode="x unified",
-        margin=dict(r=250, t=80, l=20, b=40),  # Expanded right margin for legend
+        margin=dict(r=250, t=80, l=20, b=40),
         height=850
     )
+
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
 
     html_path = f"{output_dir}/building_jobs_trend.html"
     fig.write_html(html_path, default_width='100%', default_height='100%')
@@ -3456,7 +3461,8 @@ def plot_exports(census_api_key, output_directory):
                     line=dict(width=2.5, color=line_palette[c_idx]),
                     legendgroup=grp_name,
                     legendgrouptitle_text=f"<b>{grp_name}</b>",
-                    hovertemplate="<b>%{fullData.name}</b><br>$%{y:,.1f}M<extra></extra>",
+                    # THE FIX: Removed the bolded name and line break
+                    hovertemplate="$%{y:,.1f}M<extra></extra>",
                     legend="legend"
                 ), row=1, col=1)
 
@@ -3567,21 +3573,21 @@ def main():
         os.makedirs(output_dir)
 
     try:
-        # latest_eia_year = find_latest_eia_861_year()
-        # plot_energy_burden(output_dir)
-        # plot_fuel_price_ratio(eia_key, output_dir)
+        latest_eia_year = find_latest_eia_861_year()
+        plot_energy_burden(output_dir)
+        plot_fuel_price_ratio(eia_key, output_dir)
         plot_permits_construction(census_key, output_dir)
-        # plot_county_heating_equipment(census_key, output_dir)
-        # plot_ann_elec_sales(output_dir)
-        # plot_peak_data(output_dir)
-        # plot_utility_costs(latest_eia_year, output_dir)
-        # plot_dsm_comprehensive_dashboard(latest_eia_year, output_dir)
-        # plot_building_jobs_trend(bls_key, output_dir)
-        # plot_gdp_by_building_type(bea_key, output_dir)
-        # plot_ferc_load_growth_forecasts(output_dir)
-        # plot_insurance_costs(output_dir)
-        # plot_price_expend_benchmarks(output_dir)
-        # plot_exports(census_key, output_dir)
+        plot_county_heating_equipment(census_key, output_dir)
+        plot_ann_elec_sales(output_dir)
+        plot_peak_data(output_dir)
+        plot_utility_costs(latest_eia_year, output_dir)
+        plot_dsm_comprehensive_dashboard(latest_eia_year, output_dir)
+        plot_building_jobs_trend(bls_key, output_dir)
+        plot_gdp_by_building_type(bea_key, output_dir)
+        plot_ferc_load_growth_forecasts(output_dir)
+        plot_insurance_costs(output_dir)
+        plot_price_expend_benchmarks(output_dir)
+        plot_exports(census_key, output_dir)
 
         print(f"\nPipeline complete. Visuals saved to ./{output_dir}")
     except Exception as e:

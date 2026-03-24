@@ -143,7 +143,7 @@ To serve growing electricity demand and manage new technology operation at the g
 Buildings-related jobs – jobs to design, construct, operate, and retrofit buildings – are an important component of overall US employment numbers. This chart shows the trend in buildings-related jobs over the past two decades.
 
 <div align="center">
-  <iframe src="graphics/building_jobs_trend.html" width="80%" height="700px" frameborder="0" scrolling="no"></iframe>
+  <iframe src="graphics/building_jobs_trend.html" width="100%" height="700px" frameborder="0" scrolling="no"></iframe>
 </div>
 
 <hr style="border: 2px solid #333; margin: 30px 0;">
@@ -154,7 +154,7 @@ Buildings-related jobs – jobs to design, construct, operate, and retrofit buil
 Buildings sector and other demand-side products are important players in US export markets. These charts demonstrate the magnitude of export markets for such products, the historical trends for those markets, and which countries the US is exporting the products to.
 
 <div align="center">
-  <iframe src="graphics/exports.html" width="80%" height="1350px" frameborder="0" scrolling="no"></iframe>
+  <iframe src="graphics/exports.html" width="100%" height="1350px" frameborder="0" scrolling="no"></iframe>
 </div>
 
 <hr style="border: 2px solid #333; margin: 30px 0;">
@@ -163,7 +163,7 @@ Buildings sector and other demand-side products are important players in US expo
 Activities in commercial and residential buildings contribute substantially to U.S. gross domestic product (GDP). This chart shows the wedge of those contributions together with industrial/non-building activities over the past two decades.
 
 <div align="center">
-  <iframe src="graphics/gdp_contributions.html" width="80%" height="750px" frameborder="0" scrolling="no"></iframe>
+  <iframe src="graphics/gdp_contributions.html" width="100%" height="750px" frameborder="0" scrolling="no"></iframe>
 </div>
 <hr style="border: 2px solid #333; margin: 30px 0;">
 

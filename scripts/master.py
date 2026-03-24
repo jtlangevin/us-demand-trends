@@ -640,7 +640,7 @@ def plot_permits_construction(census_key, output_dir):
             geojson=counties, locations=df_v['FIPS'],
             z=df_v['Permits_1k'], colorscale="Inferno",
             zmin=0, zmax=max_p, marker_line_width=0,
-            colorbar=dict(title="Permits/1k", x=0.46, len=0.45, y=0.75),
+            colorbar=dict(title="Permits per<br>1k people", x=0.46, len=0.45, y=0.75),
             customdata=df_v[['Name', 'Units', 'Population']],
             hovertemplate=(
                 "<b>%{customdata[0]}</b><br>"
@@ -654,7 +654,7 @@ def plot_permits_construction(census_key, output_dir):
             geojson=counties, locations=df_v['FIPS'],
             z=df_v['Cost'], colorscale="Inferno",
             zmin=min_c, zmax=max_c, marker_line_width=0,
-            colorbar=dict(title="Avg Cost ($)", x=1.02, len=0.45, y=0.75),
+            colorbar=dict(title="Avg Cost<br>($/home)", x=1.02, len=0.45, y=0.75),
             customdata=df_v[['Name', 'Units']],
             hovertemplate=(
                 "<b>%{customdata[0]}</b><br>"
@@ -860,10 +860,10 @@ def plot_county_heating_equipment(census_key, output_dir):
         rows=1, cols=2, horizontal_spacing=0.05,
         specs=[[{'type': 'choropleth'}, {'type': 'choropleth'}]],
         subplot_titles=(
-            f"Residential Electric Heating Penetration, {latest_yr}<br>"
-            "<sup>Source: Census ACS</sup>",
-            f"Electric Shift From Previous Survey, {latest_yr} vs. {base_year}"
-            "<br><sup>Source: Census ACS</sup>"
+            f"Electric Heat Penetration, {latest_yr}<br>"
+            "<sup>Source: Census ACS (Residential)</sup>",
+            f"Electric Shift, {latest_yr} vs. {base_year}"
+            "<br><sup>Source: Census ACS (Residential)</sup>"
         )
     )
 
@@ -1420,9 +1420,9 @@ def plot_peak_data(output_dir):
         subplot_titles=(
             f"Peak Demand Seasonality, {latest_yr}<br>"
             "<sup>Source: EIA 861</sup>",
-            f"Highest Winter Peak Growth States, {base_year}-{latest_yr}<br>"
+            f"Highest Winter Peak Growth, {base_year}-{latest_yr}<br>"
             "<sup>Source: EIA</sup>",
-            f"Highest Summer Peak Growth States, {base_year}-{latest_yr}<br>"
+            f"Highest Summer Peak Growth, {base_year}-{latest_yr}<br>"
             "<sup>Source: EIA</sup>"
         )
     )
@@ -1659,7 +1659,7 @@ def plot_utility_costs(year, output_dir):
     fig = make_subplots(
         rows=2, cols=1, vertical_spacing=0.12, horizontal_spacing=0.05,
         subplot_titles=(
-            f"States with Highest Utility O&M Costs, {ly}<br>"
+            f"Highest Utility O&M Costs, {ly}<br>"
             "<sup>Source: FERC Form 1</sup>",
             "CA 10-Year Utility O&M Cost Trend<br>"
             "<sup>Source: FERC Form 1 via PUDL</sup>"
@@ -1893,8 +1893,8 @@ def plot_dsm_comprehensive_dashboard(latest_yr, output_dir):
         subplot_titles=(
             f"EE Avoided Peak, {latest_yr}<br><sup>Source: EIA 861</sup>",
             f"DR Avoided Peak, {latest_yr}<br><sup>Source: EIA 861</sup>",
-            f"Highest EE Growth States by Sector ({base_year}-{latest_yr})",
-            f"Highest DR Growth States by Sector ({base_year}-{latest_yr})"
+            f"Highest EE Growth by Sector ({base_year}-{latest_yr})",
+            f"Highest DR Growth by Sector ({base_year}-{latest_yr})"
         )
     )
 
@@ -3306,8 +3306,8 @@ def plot_exports(census_api_key, output_directory):
 
     fig = make_subplots(
         rows=2, cols=2, specs=[[{"colspan": 2}, None], [{}, {}]],
-        vertical_spacing=0.15, row_heights=[0.68, 0.32],
-        horizontal_spacing=0.20,
+        vertical_spacing=0.15, row_heights=[0.70, 0.30],
+        horizontal_spacing=0.08,
         subplot_titles=(
             "Monthly Value by Export Category<br>"
             "<sup>Source: Census U.S. Exports of Goods</sup>",
@@ -3365,7 +3365,7 @@ def plot_exports(census_api_key, output_directory):
         ), row=2, col=2)
 
     fig.update_layout(
-        template="plotly_white", height=1100, barmode='relative',
+        template="plotly_white", height=1300, barmode='relative',
         hovermode="x unified",
         legend=dict(
             groupclick="toggleitem", traceorder="grouped",
@@ -3373,9 +3373,9 @@ def plot_exports(census_api_key, output_directory):
         ),
         legend2=dict(
             title="<b>Country</b>", traceorder="normal",
-            yanchor="top", y=0.34, xanchor="left", x=1.02
+            yanchor="top", y=0.32, xanchor="left", x=1.02  # Moved up
         ),
-        margin={"r": 20, "t": 50, "l": 20, "b": 50}
+        margin={"r": 150, "t": 50, "l": 20, "b": 50}
     )
 
     fig.update_yaxes(title_text="Value ($M, 12-Mo. Avg.)", row=1, col=1)

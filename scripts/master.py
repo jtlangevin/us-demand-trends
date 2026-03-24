@@ -135,7 +135,6 @@ def plot_energy_burden(output_dir):
     annotations = list(fig.layout.annotations)
     annotations[0].yshift = -20
     annotations[1].yshift = -20
-    # Center the bottom title to match the shifted domain
     annotations[2].x = 0.55
     fig.layout.annotations = annotations
 
@@ -742,7 +741,6 @@ def plot_permits_construction(census_key, output_dir):
         ticksuffix="&nbsp;&nbsp;&nbsp;&nbsp;", row=2, col=2
     )
 
-    # Adding to the left margin, expanding to the right to visually center
     fig.update_xaxes(domain=[0.15, 0.45], tickangle=0, row=2, col=1)
     fig.update_xaxes(domain=[0.60, 0.98], row=2, col=2)
 
@@ -2185,7 +2183,7 @@ def plot_building_jobs_trend(bls_key, output_dir):
 
 
 def plot_gdp_by_building_type(bea_key, output_dir):
-    """Trends in buildings activity contribution to GDP."""
+    """Trends in buildings activity contribution to GDP (Real Dollars)."""
     print("Plotting: Buildings GDP contribution (BEA API)...")
 
     if not bea_key:
@@ -2195,7 +2193,7 @@ def plot_gdp_by_building_type(bea_key, output_dir):
     url = "https://apps.bea.gov/api/data/"
     params = {
         "UserID": bea_key, "method": "GetData", "datasetname": "GdpByIndustry",
-        "TableID": "1", "Frequency": "A", "Year": "ALL",
+        "TableID": "10", "Frequency": "A", "Year": "ALL",
         "Industry": "ALL", "ResultFormat": "JSON"
     }
 
@@ -2292,19 +2290,18 @@ def plot_gdp_by_building_type(bea_key, output_dir):
             line=dict(width=0.5, color=colors[cat]), stackgroup='one',
             fillcolor=colors[cat], customdata=df_plot[['Share']],
             hovertemplate=(
-                f"<b>{cat}</b><br>"
-                "Year: %{x}<br>"
-                "Value Added: $%{{y:,.0f}} Billion<br>"
+                "Real Value Added: $%{y:,.0f} Billion<br>"
                 "Share of GDP: %{customdata[0]:.1f}%<extra></extra>"
             )
         ))
 
     fig.update_layout(
         title=(
-            "GDP Contributions of Activities in Buildings, "
-            f"{min_gdp_year}-{max_gdp_year}<br><sup>Source: BEA</sup>"
+            "Real GDP Contributions of Activities in Buildings, "
+            f"{min_gdp_year}-{max_gdp_year}<br>"
+            "<sup>Source: BEA (Inflation-Adjusted Chained Dollars)</sup>"
         ),
-        xaxis_title="Year", yaxis_title="GDP Contribution ($ Billions)",
+        xaxis_title="Year", yaxis_title="Real GDP Contribution ($ Billions)",
         template="plotly_white", hovermode="x unified",
         legend=dict(
             orientation="h", yanchor="top", y=-0.15, xanchor="center", x=0.5
@@ -2542,7 +2539,7 @@ def plot_ferc_load_growth_forecasts(output_dir):
 
     annotations = list(fig.layout.annotations)
     for a in annotations:
-        a.yshift = -45
+        a.yshift = -25
     fig.layout.annotations = annotations
 
     cmax_val = df_map['pct_10yr'].quantile(0.95)
@@ -3309,7 +3306,7 @@ def plot_exports(census_api_key, output_directory):
 
     fig = make_subplots(
         rows=2, cols=2, specs=[[{"colspan": 2}, None], [{}, {}]],
-        vertical_spacing=0.18, row_heights=[0.68, 0.32],
+        vertical_spacing=0.15, row_heights=[0.68, 0.32],
         horizontal_spacing=0.20,
         subplot_titles=(
             "Monthly Value by Export Category<br>"
@@ -3368,7 +3365,7 @@ def plot_exports(census_api_key, output_directory):
         ), row=2, col=2)
 
     fig.update_layout(
-        template="plotly_white", height=1300, barmode='relative',
+        template="plotly_white", height=1100, barmode='relative',
         hovermode="x unified",
         legend=dict(
             groupclick="toggleitem", traceorder="grouped",

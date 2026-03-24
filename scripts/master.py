@@ -515,6 +515,9 @@ def plot_permits_construction(census_key, output_dir):
     min_c = df_v['Cost'].min()
     max_c = df_v['Cost'].quantile(0.95)
 
+    # -------------------------------------------------------------
+    # LOAD AND PROCESS NAHB DATA (Single-Family Baseline)
+    # -------------------------------------------------------------
     try:
         df_full = pd.read_csv('input_data/cost_comps_full.csv')
         df_overhead = pd.read_csv('input_data/cost_comps_overhead.csv')
@@ -590,6 +593,39 @@ def plot_permits_construction(census_key, output_dir):
         for x in np.linspace(0.4, 0.9, len(df2[df2['Group'] == 'Non']))
     ]
 
+    # -------------------------------------------------------------
+    # LOAD TERNER CENTER DATA (Multi-Family Comparative Baseline)
+    # -------------------------------------------------------------
+    terner_high = pd.DataFrame([
+        {'Label': 'Hard Costs', 'Percent': 65.0, 'Group': 'Hard'},
+        {'Label': 'Soft Costs', 'Percent': 22.0, 'Group': 'Soft'},
+        {'Label': 'Land Acquisition', 'Percent': 13.0, 'Group': 'Land'}
+    ])
+    terner_high['LegendLabel'] = terner_high.apply(
+        lambda x: f"{x['Label']} ({x['Percent']:.0f}%)", axis=1
+    )
+
+    # Read the detailed breakdown dynamically from the inputs folder
+    try:
+        terner_det = pd.read_csv('input_data/terner_cost_breakdown.csv')
+    except Exception as e:
+        print(f"\n[WARNING] Could not load terner_cost_breakdown.csv: {e}")
+        return
+
+    terner_det['LegendLabel'] = terner_det.apply(
+        lambda x: f"{x['Label']} ({x['Percent']:.0f}%)", axis=1
+    )
+
+    # Assign colors dynamically matching NAHB structure (Reds/Blues) + Greens
+    terner_det['Color'] = (
+        [mcolors.to_hex(cmap_red(x)) for x in np.linspace(0.4, 0.9, 6)] +
+        [mcolors.to_hex(cmap_blue(x)) for x in np.linspace(0.4, 0.9, 4)] +
+        ['#81C784']
+    )
+
+    # -------------------------------------------------------------
+    # DURATION DATA (CENSUS SOC)
+    # -------------------------------------------------------------
     parsed_soc = fetch_and_clean_census_regions()
     if parsed_soc:
         soc_data, regions_list, soc_year = parsed_soc
@@ -597,9 +633,7 @@ def plot_permits_construction(census_key, output_dir):
             [reg for reg in regions_list for _ in range(2)],
             ["SF", "MF"] * len(regions_list)
         ]
-
-        y_soc_auth = []
-        y_soc_build = []
+        y_soc_auth, y_soc_build = [], []
         for reg in regions_list:
             y_soc_auth.extend(
                 [soc_data[reg]["SF_Auth"], soc_data[reg]["MF_Auth"]]
@@ -610,6 +644,9 @@ def plot_permits_construction(census_key, output_dir):
     else:
         soc_year = "Data Unavailable"
 
+    # -------------------------------------------------------------
+    # BUILD DASHBOARD
+    # -------------------------------------------------------------
     fig = make_subplots(
         rows=2, cols=2,
         row_heights=[0.6, 0.4],
@@ -624,9 +661,9 @@ def plot_permits_construction(census_key, output_dir):
             "<sup>Source: Census BPS</sup>",
             f"New Housing Construction Cost, {target_year}<br>"
             "<sup>Source: Census BPS</sup>",
-            f"Average Build Duration, {soc_year}<br>"
+            f"Average Build Duration by Region, {soc_year}<br>"
             "<sup>Source: Census SOC</sup>",
-            "Typical New SFH: Sale Price, 2024<br><sup>Source: NAHB</sup>"
+            "Cost Breakdown: Single-Family<br><sup>Source: NAHB (2024)</sup>"
         )
     )
 
@@ -635,12 +672,13 @@ def plot_permits_construction(census_key, output_dir):
     annotations[1].yshift = -20
     fig.layout.annotations = annotations
 
+    # Maps
     fig.add_trace(
         go.Choropleth(
             geojson=counties, locations=df_v['FIPS'],
             z=df_v['Permits_1k'], colorscale="Inferno",
             zmin=0, zmax=max_p, marker_line_width=0,
-            colorbar=dict(title="Permits per<br>1k people", x=0.46, len=0.45, y=0.75),
+            colorbar=dict(title="Permits/1k", x=0.46, len=0.45, y=0.75),
             customdata=df_v[['Name', 'Units', 'Population']],
             hovertemplate=(
                 "<b>%{customdata[0]}</b><br>"
@@ -654,7 +692,7 @@ def plot_permits_construction(census_key, output_dir):
             geojson=counties, locations=df_v['FIPS'],
             z=df_v['Cost'], colorscale="Inferno",
             zmin=min_c, zmax=max_c, marker_line_width=0,
-            colorbar=dict(title="Avg Cost<br>($/home)", x=1.02, len=0.45, y=0.75),
+            colorbar=dict(title="Avg Cost ($)", x=1.02, len=0.45, y=0.75),
             customdata=df_v[['Name', 'Units']],
             hovertemplate=(
                 "<b>%{customdata[0]}</b><br>"
@@ -663,6 +701,7 @@ def plot_permits_construction(census_key, output_dir):
         ), row=1, col=2
     )
 
+    # Bar 1: SOC Durations
     if parsed_soc:
         y_soc_total = [a + b for a, b in zip(y_soc_auth, y_soc_build)]
         max_duration = max(y_soc_total) if y_soc_total else 20
@@ -689,27 +728,25 @@ def plot_permits_construction(census_key, output_dir):
             legend="legend2"
         ), row=2, col=1)
 
-    colors1 = {
-        'Total Const. Costs': '#E57373', 'Non-Const. Costs': '#64B5F6'
-    }
-
+    # Bar 2: Costs Breakdown (NAHB Traces)
+    colors_nahb_high = {'Total Const. Costs': '#E57373', 'Non-Const. Costs': '#64B5F6'}
     for _, row in df1.iterrows():
         fig.add_trace(go.Bar(
-            x=[row['Cost']], y=['High Level'], name=row['LegendLabel'],
+            x=[row['Percent']], y=['High Level'], name=row['LegendLabel'],
             orientation='h',
-            marker=dict(color=colors1.get(row['Label'], '#E57373')),
+            marker=dict(color=colors_nahb_high.get(row['Label'], '#E57373')),
             legendgroup='High Level',
             hovertemplate=(
                 f"<b>{row['Label']}</b><br>"
                 f"Cost: ${row['Cost']/1000:.0f}K<br>"
                 f"Share: {row['Percent']:.1f}%<extra></extra>"
             ),
-            legend="legend"
+            legend="legend", visible=True
         ), row=2, col=2)
 
     for _, row in df2_sorted.iterrows():
         fig.add_trace(go.Bar(
-            x=[row['Cost']], y=['Detailed'], name=row['LegendLabel'],
+            x=[row['Percent']], y=['Detailed'], name=row['LegendLabel'],
             orientation='h', marker=dict(color=row['Color']),
             legendgroup='Detailed Breakdown',
             hovertemplate=(
@@ -717,8 +754,54 @@ def plot_permits_construction(census_key, output_dir):
                 f"Cost: ${row['Cost']/1000:.0f}K<br>"
                 f"Share: {row['Percent']:.1f}%<extra></extra>"
             ),
-            legend="legend"
+            legend="legend", visible=True
         ), row=2, col=2)
+
+    # Bar 2: Costs Breakdown (Terner Center Traces - Default Hidden)
+    colors_terner_high = {
+        'Hard Costs': '#E57373', 'Soft Costs': '#64B5F6',
+        'Land Acquisition': '#81C784'
+    }
+    for _, row in terner_high.iterrows():
+        fig.add_trace(go.Bar(
+            x=[row['Percent']], y=['High Level'], name=row['LegendLabel'],
+            orientation='h',
+            marker=dict(color=colors_terner_high.get(row['Label'])),
+            legendgroup='High Level',
+            hovertemplate=(
+                f"<b>{row['Label']}</b><br>"
+                f"Share: {row['Percent']:.1f}%<extra></extra>"
+            ),
+            legend="legend", visible=False
+        ), row=2, col=2)
+
+    for _, row in terner_det.iterrows():
+        fig.add_trace(go.Bar(
+            x=[row['Percent']], y=['Detailed'], name=row['LegendLabel'],
+            orientation='h', marker=dict(color=row['Color']),
+            legendgroup='Detailed Breakdown',
+            hovertemplate=(
+                f"<b>{row['Label']}</b><br>"
+                f"Share: {row['Percent']:.1f}%<extra></extra>"
+            ),
+            legend="legend", visible=False
+        ), row=2, col=2)
+
+    # -------------------------------------------------------------
+    # LAYOUT, DOMAINS & TOGGLE MENUS
+    # -------------------------------------------------------------
+
+    # Calculate trace indices for toggle buttons
+    base_traces = 4  # 2 maps, 2 soc duration bars
+    nahb_traces = len(df1) + len(df2_sorted)
+    terner_traces = len(terner_high) + len(terner_det)
+
+    show_nahb = (
+        [True] * base_traces + [True] * nahb_traces + [False] * terner_traces
+    )
+    show_terner = (
+        [True] * base_traces + [False] * nahb_traces + [True] * terner_traces
+    )
 
     fig.update_layout(
         dragmode="pan",
@@ -726,6 +809,38 @@ def plot_permits_construction(census_key, output_dir):
         geo=dict(scope='usa', projection_type='albers usa'),
         geo2=dict(scope='usa', projection_type='albers usa'),
         margin={"r": 0, "t": 60, "l": 0, "b": 150},
+        updatemenus=[
+            dict(
+                type="buttons",
+                direction="down",
+                x=0.98, y=0.41,
+                xanchor="right", yanchor="bottom",
+                buttons=list([
+                    dict(
+                        label="Single-Family (NAHB)",
+                        method="update",
+                        args=[
+                            {"visible": show_nahb},
+                            {"annotations[3].text": (
+                                "Cost Breakdown: Single-Family<br><sup>Source: "
+                                "NAHB (2024)</sup>")}
+                        ]
+                    ),
+                    dict(
+                        label="Multi-Family (Terner)",
+                        method="update",
+                        args=[
+                            {"visible": show_terner},
+                            {"annotations[3].text": (
+                                "Cost Breakdown: Multi-Family<br><sup>Source: "
+                                "Terner Center (2023)</sup>")}
+                        ]
+                    )
+                ]),
+                showactive=True,
+                bgcolor="white", bordercolor="gray", borderwidth=1
+            )
+        ],
         legend=dict(
             orientation="v", yanchor="top", y=-0.06, xanchor="center", x=0.79,
             groupclick="toggleitem", title_text="<b>Cost Components</b>"
@@ -742,7 +857,11 @@ def plot_permits_construction(census_key, output_dir):
     )
 
     fig.update_xaxes(domain=[0.15, 0.45], tickangle=0, row=2, col=1)
-    fig.update_xaxes(domain=[0.60, 0.98], row=2, col=2)
+    # Ensure cost bars map strictly from 0 to 100% horizontally
+    fig.update_xaxes(
+        domain=[0.60, 0.98], range=[0, 100], title_text="% of Total Cost", 
+        row=2, col=2
+    )
 
     fig.update_yaxes(
         title_text="Total Duration (Months)", dtick=4,

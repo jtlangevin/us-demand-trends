@@ -5,8 +5,8 @@
 <br>
 
 ### 🤝 Contributions
-* Fork the code and submit pull requests via [GitHub](https://github.com/jtlangevin/us-demand-trends).
 * Spot a problem with the results or have a request for an improvement? [Submit an issue](https://github.com/jtlangevin/us-demand-trends/issues).
+* Help develop the underlying code via [GitHub](https://github.com/jtlangevin/us-demand-trends).
 
 <br>
 

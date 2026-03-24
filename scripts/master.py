@@ -125,10 +125,15 @@ def plot_energy_burden(output_dir):
             [{'type': 'bar', 'colspan': 2}, None]
         ],
         subplot_titles=(
-            f"Total Energy Burden, {found_year}<br><sup>Source: RECS</sup>",
-            f"Electric Energy Burden, {found_year}<br><sup>Source: RECS</sup>",
-            f"Total and Electric Energy Burden by State, {found_year}"
-            "<br><sup>Source: RECS</sup>"
+            f"Total Energy Burden, {found_year}<br>"
+            "<sup>Source: <a href='https://www.eia.gov/consumption/"
+            "residential/' target='_blank'>EIA RECS</a></sup>",
+            f"Electric Energy Burden, {found_year}<br>"
+            "<sup>Source: <a href='https://www.eia.gov/consumption/"
+            "residential/' target='_blank'>EIA RECS</a></sup>",
+            f"Total and Electric Energy Burden by State, {found_year}<br>"
+            "<sup>Source: <a href='https://www.eia.gov/consumption/"
+            "residential/' target='_blank'>EIA RECS</a></sup>"
         )
     )
 
@@ -294,11 +299,20 @@ def plot_fuel_price_ratio(eia_key, output_dir):
         ],
         subplot_titles=(
             f"Residential Customers, {target_year}<br>"
-            "<sup>Source: EIA Surveys</sup>",
+            "<sup>Source: EIA <a href='https://www.eia.gov/electricity/data/"
+            "state/' target='_blank'>Electric</a> and "
+            "<a href='https://www.eia.gov/naturalgas/' target='_blank'>"
+            "Gas Surveys</a> </sup>",
             f"Commercial Customers, {target_year}<br>"
-            "<sup>Source: EIA Surveys</sup>",
+            "<sup>Source: EIA <a href='https://www.eia.gov/electricity/data/"
+            "state/' target='_blank'>Electric</a> and "
+            "<a href='https://www.eia.gov/naturalgas/' target='_blank'>"
+            "Gas Surveys</a> </sup>",
             f"Electric vs. Gas Price Ratio by State, {target_year}<br>"
-            "<sup>Source: EIA</sup>"
+            "<sup>Source: EIA <a href='https://www.eia.gov/electricity/data/"
+            "state/' target='_blank'>Electric</a> and "
+            "<a href='https://www.eia.gov/naturalgas/' target='_blank'>"
+            "Gas Surveys</a> </sup>"
         )
     )
 
@@ -658,12 +672,19 @@ def plot_permits_construction(census_key, output_dir):
         ],
         subplot_titles=(
             f"New Housing Permits, {target_year}<br>"
-            "<sup>Source: Census BPS</sup>",
+            "<sup>Source: <a href='https://www.census.gov/construction/bps/' "
+            "target='_blank'>Census BPS</a></sup>",
             f"New Housing Construction Cost, {target_year}<br>"
-            "<sup>Source: Census BPS</sup>",
+            "<sup>Source: <a href='https://www.census.gov/construction/bps/' "
+            "target='_blank'>Census BPS</a></sup>",
             f"Average Build Duration by Region, {soc_year}<br>"
-            "<sup>Source: Census SOC</sup>",
-            "Cost Breakdown: Single-Family<br><sup>Source: NAHB (2024)</sup>"
+            "<sup>Source: <a href='https://www.census.gov/construction/nrc/"
+            "index.html' target='_blank'>Census SOC</a></sup>",
+            "Cost Breakdown: Single-Family<br>"
+            "<sup>Source: <a href='https://www.nahb.org/news-and-economics/"
+            "housing-economics-plus/special-studies/special-studies-pages/"
+            "cost-of-constructing-a-home-in-2024' target='_blank'>"
+            "NAHB (2024)</a></sup>"
         )
     )
 
@@ -729,7 +750,9 @@ def plot_permits_construction(census_key, output_dir):
         ), row=2, col=1)
 
     # Bar 2: Costs Breakdown (NAHB Traces)
-    colors_nahb_high = {'Total Const. Costs': '#E57373', 'Non-Const. Costs': '#64B5F6'}
+    colors_nahb_high = {
+        'Total Const. Costs': '#E57373', 'Non-Const. Costs': '#64B5F6'
+    }
     for _, row in df1.iterrows():
         fig.add_trace(go.Bar(
             x=[row['Percent']], y=['High Level'], name=row['LegendLabel'],
@@ -822,8 +845,11 @@ def plot_permits_construction(census_key, output_dir):
                         args=[
                             {"visible": show_nahb},
                             {"annotations[3].text": (
-                                "Cost Breakdown: Single-Family<br><sup>Source: "
-                                "NAHB (2024)</sup>")}
+                                "Cost Breakdown: Single-Family<br>"
+                                "<sup>Source: <a href='https://www.nahb.org/news-and-economics/"
+                                "housing-economics-plus/special-studies/special-studies-pages/"
+                                "cost-of-constructing-a-home-in-2024' "
+                                "target='_blank'>NAHB (2024)</a></sup>")}
                         ]
                     ),
                     dict(
@@ -832,8 +858,11 @@ def plot_permits_construction(census_key, output_dir):
                         args=[
                             {"visible": show_terner},
                             {"annotations[3].text": (
-                                "Cost Breakdown: Multi-Family<br><sup>Source: "
-                                "Terner Center (2023)</sup>")}
+                                "Cost Breakdown: Multi-Family<br>"
+                                "<sup>Source: <a href='https://ternercenter."
+                                "berkeley.edu/research-and-policy/making-it-"
+                                "pencil-2023/' target='_blank'>"
+                                "Terner Center (2023)</a></sup>")}
                         ]
                     )
                 ]),
@@ -859,7 +888,7 @@ def plot_permits_construction(census_key, output_dir):
     fig.update_xaxes(domain=[0.15, 0.45], tickangle=0, row=2, col=1)
     # Ensure cost bars map strictly from 0 to 100% horizontally
     fig.update_xaxes(
-        domain=[0.60, 0.98], range=[0, 100], title_text="% of Total Cost", 
+        domain=[0.60, 0.98], range=[0, 100], title_text="% of Total Cost",
         row=2, col=2
     )
 
@@ -980,9 +1009,11 @@ def plot_county_heating_equipment(census_key, output_dir):
         specs=[[{'type': 'choropleth'}, {'type': 'choropleth'}]],
         subplot_titles=(
             f"Electric Heat Penetration, {latest_yr}<br>"
-            "<sup>Source: Census ACS (Residential)</sup>",
-            f"Electric Shift, {latest_yr} vs. {base_year}"
-            "<br><sup>Source: Census ACS (Residential)</sup>"
+            "<sup>Source: <a href='https://www.census.gov/programs-surveys/"
+            "acs' target='_blank'>Census ACS (Residential)</a></sup>",
+            f"Electric Shift, {latest_yr} vs. {base_year}<br>"
+            "<sup>Source: <a href='https://www.census.gov/programs-surveys/"
+            "acs' target='_blank'>Census ACS (Residential)</a></sup>"
         )
     )
 
@@ -1281,9 +1312,12 @@ def plot_ann_elec_sales(output_dir):
         horizontal_spacing=0.05,
         subplot_titles=(
             f"Annual Electricity Sales by State, {latest_yr}, and Growth, "
-            f"{base_year}-{latest_yr}<br><sup>Source: EIA 861</sup>",
+            f"{base_year}-{latest_yr}<br>"
+            "<sup>Source: <a href='https://www.eia.gov/electricity/data/"
+            "eia861/' target='_blank'>EIA 861</a></sup>",
             f"Highest Sales Growth States by Sector, {base_year}-{latest_yr}"
-            "<br><sup>Source: EIA 861</sup>"
+            "<br><sup>Source: <a href='https://www.eia.gov/electricity/data/"
+            "eia861/' target='_blank'>EIA 861</a></sup>"
         )
     )
 
@@ -1538,11 +1572,14 @@ def plot_peak_data(output_dir):
         ],
         subplot_titles=(
             f"Peak Demand Seasonality, {latest_yr}<br>"
-            "<sup>Source: EIA 861</sup>",
-            f"Highest Winter Peak Growth, {base_year}-{latest_yr}<br>"
-            "<sup>Source: EIA</sup>",
-            f"Highest Summer Peak Growth, {base_year}-{latest_yr}<br>"
-            "<sup>Source: EIA</sup>"
+            "<sup>Source: <a href='https://www.eia.gov/electricity/data/"
+            "eia861/' target='_blank'>EIA 861</a></sup>",
+            f"Highest Winter Peak Growth States, {base_year}-{latest_yr}<br>"
+            "<sup>Source: <a href='https://www.eia.gov/electricity/data/"
+            "eia861/' target='_blank'>EIA 861</a></sup>",
+            f"Highest Summer Peak Growth States, {base_year}-{latest_yr}<br>"
+            "<sup>Source: <a href='https://www.eia.gov/electricity/data/"
+            "eia861/' target='_blank'>EIA 861</a></sup>"
         )
     )
 
@@ -1779,9 +1816,19 @@ def plot_utility_costs(year, output_dir):
         rows=2, cols=1, vertical_spacing=0.12, horizontal_spacing=0.05,
         subplot_titles=(
             f"Highest Utility O&M Costs, {ly}<br>"
-            "<sup>Source: FERC Form 1</sup>",
+            "<sup>Source: <a href='https://www.ferc.gov/industries-data/"
+            "electric/general-information/electric-industry-forms/"
+            "form-1-electric-utility-annual-report' target='_blank'>FERC Form 1</a>"
+            " via <a href='https://catalystcoop-pudl.readthedocs.io/en/"
+            "latest/data_sources/ferc1.html'"
+            " target='_blank'>PUDL</a></sup>",
             "CA 10-Year Utility O&M Cost Trend<br>"
-            "<sup>Source: FERC Form 1 via PUDL</sup>"
+            "<sup>Source: <a href='https://www.ferc.gov/industries-data/"
+            "electric/general-information/electric-industry-forms/"
+            "form-1-electric-utility-annual-report' target='_blank'>FERC Form 1</a>"
+            " via <a href='https://catalystcoop-pudl.readthedocs.io/en/"
+            "latest/data_sources/ferc1.html'"
+            " target='_blank'>PUDL</a></sup>"
         )
     )
 
@@ -2010,10 +2057,18 @@ def plot_dsm_comprehensive_dashboard(latest_yr, output_dir):
             [{"type": "xy"}, {"type": "xy"}]
         ],
         subplot_titles=(
-            f"EE Avoided Peak, {latest_yr}<br><sup>Source: EIA 861</sup>",
-            f"DR Avoided Peak, {latest_yr}<br><sup>Source: EIA 861</sup>",
-            f"Highest EE Growth by Sector ({base_year}-{latest_yr})",
-            f"Highest DR Growth by Sector ({base_year}-{latest_yr})"
+            f"EE Avoided Peak, {latest_yr}<br>"
+            "<sup>Source: <a href='https://www.eia.gov/electricity/data/"
+            "eia861/' target='_blank'>EIA 861</a></sup>",
+            f"DR Avoided Peak, {latest_yr}<br>"
+            "<sup>Source: <a href='https://www.eia.gov/electricity/data/"
+            "eia861/' target='_blank'>EIA 861</a></sup>",
+            f"Highest EE Growth by Sector ({base_year}-{latest_yr})<br>"
+            "<sup>Source: <a href='https://www.eia.gov/electricity/data/"
+            "eia861/' target='_blank'>EIA 861</a></sup>",
+            f"Highest DR Growth by Sector ({base_year}-{latest_yr})<br>"
+            "<sup>Source: <a href='https://www.eia.gov/electricity/data/"
+            "eia861/' target='_blank'>EIA 861</a></sup>"
         )
     )
 
@@ -2280,8 +2335,9 @@ def plot_building_jobs_trend(bls_key, output_dir):
     fig.update_layout(
         title=(
             f"Trends in Buildings-related Jobs (2006-{max_year})<br>"
-            f"<sup>Source: BLS; Data through {max_month_name} {max_year}; "
-            "12-Month Trailing Average</sup>"
+            "<sup>Source: <a href='https://www.bls.gov/data/' "
+            f"target='_blank'>BLS</a>; Data through {max_month_name} "
+            f"{max_year}; 12-Month Trailing Average</sup>"
         ),
         xaxis_title="Year", yaxis_title="Total Employees (Thousands)",
         template="plotly_white",
@@ -2418,7 +2474,9 @@ def plot_gdp_by_building_type(bea_key, output_dir):
         title=(
             "Real GDP Contributions of Activities in Buildings, "
             f"{min_gdp_year}-{max_gdp_year}<br>"
-            "<sup>Source: BEA (Inflation-Adjusted Chained Dollars)</sup>"
+            "<sup>Source: <a href='https://www.bea.gov/data/gdp/gdp-industry' "
+            "target='_blank'>BEA</a> (Inflation-Adjusted Chained "
+            "Dollars)</sup>"
         ),
         xaxis_title="Year", yaxis_title="Real GDP Contribution ($ Billions)",
         template="plotly_white", hovermode="x unified",
@@ -2649,9 +2707,17 @@ def plot_ferc_load_growth_forecasts(output_dir):
         specs=[[{'type': 'scattergeo'}, {'type': 'scattergeo'}]],
         subplot_titles=(
             f"5-Year Projection, {latest_yr}<br>"
-            "<sup>Source: FERC Form 714 via PUDL</sup>",
+            "<sup>Source: FERC <a href='https://www.ferc.gov/industries-data/electric/"
+            "general-information/electric-industry-forms/form-no-714-annual-electric/"
+            "data' target='_blank'>Form 714</a> via "
+            "<a href='https://catalystcoop-pudl.readthedocs.io/en/"
+            "latest/data_sources/ferc714.html' target='_blank'>PUDL</a></sup>",
             f"10-Year Projection, {latest_yr}<br>"
-            "<sup>Source: FERC Form 714 via PUDL</sup>"
+            "<sup>Source: FERC <a href='https://www.ferc.gov/industries-data/electric/"
+            "general-information/electric-industry-forms/form-no-714-annual-electric/"
+            "data' target='_blank'>Form 714</a> via "
+            "<a href='https://catalystcoop-pudl.readthedocs.io/en/"
+            "latest/data_sources/ferc714.html' target='_blank'>PUDL</a></sup>",
         ),
         horizontal_spacing=0
     )
@@ -2861,8 +2927,9 @@ def plot_insurance_costs(output_dir):
         dragmode="pan",
         title_text=(
             f"Homeowners Insurance Costs, {target_year}<br>"
-            "<sup>Source: Census ACS; Median, includes fire, hazard, "
-            "and flood</sup>"
+            "<sup>Source: <a href='https://www.census.gov/programs-surveys/"
+            "acs' target='_blank'>Census ACS</a>; Median, includes fire, "
+            "hazard, and flood</sup>"
         ),
         title_x=0.5,
         margin={"r": 0, "t": 60, "l": 0, "b": 0}, height=700,
@@ -3170,9 +3237,15 @@ def plot_price_expend_benchmarks(output_dir):
             rows=1, cols=2,
             subplot_titles=(
                 f"Trend in Energy Prices<br>"
-                f"<sup>Source: EIA; Real {latest_yr} dollars</sup>",
+                "<sup>Source: EIA <a href='https://www.eia.gov/electricity/data/eia861m' "
+                f"target='_blank'>Electric</a> and <a href='https://www.eia.gov/dnav/ng/"
+                "ng_pri_sum_dcu_nus_m.htm' "
+                f"target='_blank'>Gas</a> Surveys; Real {latest_yr} dollars</sup>",
                 f"Trend in Energy Expenditures per Customer<br>"
-                f"<sup>Source: EIA; Real {latest_yr} dollars</sup>"
+                "<sup>Source: EIA <a href='https://www.eia.gov/electricity/data/eia861m' "
+                f"target='_blank'>Electric</a> and <a href='https://www.eia.gov/dnav/ng/"
+                "ng_pri_sum_dcu_nus_m.htm' "
+                f"target='_blank'>Gas</a> Surveys; Real {latest_yr} dollars</sup>",
             ),
             shared_yaxes=True,
             horizontal_spacing=0.08,
@@ -3429,11 +3502,17 @@ def plot_exports(census_api_key, output_directory):
         horizontal_spacing=0.08,
         subplot_titles=(
             "Monthly Value by Export Category<br>"
-            "<sup>Source: Census U.S. Exports of Goods</sup>",
+            "<sup>Source: <a href='https://www.census.gov/data/developers/data-sets/"
+            "international-trade.html' target='_blank'>Census U.S. Exports of Goods</a>"
+            "</sup>",
             f"% of {latest_year} Total<br>"
-            "<sup>Source: Census U.S. Exports of Goods</sup>",
+            "<sup>Source: <a href='https://www.census.gov/data/developers/data-sets/"
+            "international-trade.html' target='_blank'>Census U.S. Exports of Goods</a>"
+            "</sup>",
             f"% Growth, {base_year}-{latest_year}<br>"
-            "<sup>Source: Census U.S. Exports of Goods</sup>"
+            "<sup>Source: <a href='https://www.census.gov/data/developers/data-sets/"
+            "international-trade.html' target='_blank'>Census U.S. Exports of Goods</a>"
+            "</sup>"
         )
     )
 
@@ -3492,7 +3571,7 @@ def plot_exports(census_api_key, output_directory):
         ),
         legend2=dict(
             title="<b>Country</b>", traceorder="normal",
-            yanchor="top", y=0.32, xanchor="left", x=1.02  # Moved up
+            yanchor="top", y=0.32, xanchor="left", x=1.02
         ),
         margin={"r": 150, "t": 50, "l": 20, "b": 50}
     )
@@ -3562,20 +3641,20 @@ def main():
 
     try:
         latest_eia_year = find_latest_eia_861_year()
-        plot_energy_burden(output_dir)
-        plot_fuel_price_ratio(eia_key, output_dir)
-        plot_permits_construction(census_key, output_dir)
-        plot_county_heating_equipment(census_key, output_dir)
-        plot_ann_elec_sales(output_dir)
-        plot_peak_data(output_dir)
+        # plot_energy_burden(output_dir)
+        # plot_fuel_price_ratio(eia_key, output_dir)
+        # plot_permits_construction(census_key, output_dir)
+        # plot_county_heating_equipment(census_key, output_dir)
+        # plot_ann_elec_sales(output_dir)
+        # plot_peak_data(output_dir)
         plot_utility_costs(latest_eia_year, output_dir)
         plot_dsm_comprehensive_dashboard(latest_eia_year, output_dir)
-        plot_building_jobs_trend(bls_key, output_dir)
-        plot_gdp_by_building_type(bea_key, output_dir)
-        plot_ferc_load_growth_forecasts(output_dir)
-        plot_insurance_costs(output_dir)
-        plot_price_expend_benchmarks(output_dir)
-        plot_exports(census_key, output_dir)
+        # plot_building_jobs_trend(bls_key, output_dir)
+        # plot_gdp_by_building_type(bea_key, output_dir)
+        # plot_ferc_load_growth_forecasts(output_dir)
+        # plot_insurance_costs(output_dir)
+        # plot_price_expend_benchmarks(output_dir)
+        # plot_exports(census_key, output_dir)
 
         print(f"\nPipeline complete. Visuals saved to ./{output_dir}")
     except Exception as e:

@@ -6,7 +6,7 @@ A live-data pipeline for extracting, cleaning, and
 visualizing U.S. buildings sector data from federal APIs.
 No dummy data is used. Requires valid API keys for BLS, EIA, BEA, ITA,
 and the US Census Bureau.
-Saves all outputs as static .png files.
+Saves all outputs as static .html files.
 """
 
 import os
@@ -66,27 +66,23 @@ def fetch_eia_v2_data(route, params, api_key):
 def plot_energy_burden(output_dir):
     """Superimposes electric vs total energy burden dual-map HTML."""
     print("Plotting: Energy burden by state (EIA RECS)...")
-    # 1. DYNAMICALLY FIND LATEST RECS DATA
     recs_df = None
     target_year = pd.Timestamp.now().year
     found_year = 2020  # Fallback minimum
 
-    # Search backward from current year
     while target_year >= 2020:
-        # EIA often releases multiple versions (v1, v2... up to v5 or higher)
-        # We check common version numbers in descending order to get the latest
         for v in range(5, 0, -1):
             url = (
-                f"https://www.eia.gov/consumption/residential/data/{target_year}/"
-                f"csv/recs{target_year}_public_v{v}.csv"
+                "https://www.eia.gov/consumption/residential/data/"
+                f"{target_year}/csv/recs{target_year}_public_v{v}.csv"
             )
             try:
-                # Use a head request to quickly check if the file exists
                 r = requests.head(url, timeout=5)
                 if r.status_code == 200:
                     print(f" -> Success! Found RECS {target_year} (v{v})")
                     recs_df = pd.read_csv(url, usecols=[
-                        'state_postal', 'TOTALDOL', 'DOLLAREL', 'MONEYPY'])
+                        'state_postal', 'TOTALDOL', 'DOLLAREL', 'MONEYPY'
+                    ])
                     found_year = target_year
                     break
             except Exception:
@@ -110,119 +106,102 @@ def plot_energy_burden(output_dir):
 
     df = df[df['MONEYPY'].isin(income_map.keys())].copy()
     df['Income_Est'] = df['MONEYPY'].map(income_map)
-
-    # Calculate both percentages
     df['Total_Burden_Pct'] = (df['TOTALDOL'] / df['Income_Est']) * 100
     df['Electric_Burden_Pct'] = (df['DOLLAREL'] / df['Income_Est']) * 100
 
-    # Group by state and calculate medians for both
     cols = ['Total_Burden_Pct', 'Electric_Burden_Pct']
     state_burden = df.groupby('state_postal')[cols].median().reset_index()
     state_burden = state_burden.sort_values('Total_Burden_Pct', ascending=True)
 
     max_burden = state_burden['Total_Burden_Pct'].max()
 
-    # ==========================================
-    # BUILD COMBINED DASHBOARD
-    # ==========================================
     fig = make_subplots(
         rows=2, cols=2,
-        row_heights=[0.3, 0.7],
-        vertical_spacing=0.15,  # Increased to create more gap below maps
-        horizontal_spacing=0.05,  # <-- This pulls the maps right next to each other
+        row_heights=[0.6, 0.4],
+        vertical_spacing=0.15,
+        horizontal_spacing=0.05,
         specs=[
-            [{'type': 'choropleth'}, {'type': 'choropleth'}],  # Top: Maps
-            [{'type': 'bar', 'colspan': 2}, None]              # Bottom: Bar
+            [{'type': 'choropleth'}, {'type': 'choropleth'}],
+            [{'type': 'bar', 'colspan': 2}, None]
         ],
         subplot_titles=(
-            (f"Total Energy Burden, {found_year}<br>"
-             "<sup>Source: RECS</sup>"),
-            (f"Electric Energy Burden, {found_year}<br>"
-             "<sup>Source: RECS</sup>"),
-            (f"Total and Electric Energy Burden by State, {found_year}<br>"
-             "<sup>Source: RECS</sup>")
+            f"Total Energy Burden, {found_year}<br><sup>Source: RECS</sup>",
+            f"Electric Energy Burden, {found_year}<br><sup>Source: RECS</sup>",
+            f"Total and Electric Energy Burden by State, {found_year}"
+            "<br><sup>Source: RECS</sup>"
         )
     )
 
-    # --- ROW 1: THE MAPS ---
+    annotations = list(fig.layout.annotations)
+    annotations[0].yshift = -20
+    annotations[1].yshift = -20
+    # Center the bottom title to match the shifted domain
+    annotations[2].x = 0.55
+    fig.layout.annotations = annotations
+
     fig.add_trace(
         go.Choropleth(
             locations=state_burden['state_postal'],
             z=state_burden['Total_Burden_Pct'],
-            locationmode="USA-states",
-            colorscale="magma",
+            locationmode="USA-states", colorscale="magma",
             zmin=0, zmax=max_burden,
-            colorbar=dict(title="Median %", x=0.46, len=0.3, y=0.8),
+            colorbar=dict(title="Median %", x=0.46, len=0.45, y=0.70),
             hovertemplate=(
-                "<b>%{location}</b><br>Total: %{z:.2f}%<extra></extra>"
+                "<b>%{location}</b><br>"
+                "Total: %{z:.2f}%<extra></extra>"
             )
-        ),
-        row=1, col=1
+        ), row=1, col=1
     )
 
     fig.add_trace(
         go.Choropleth(
             locations=state_burden['state_postal'],
             z=state_burden['Electric_Burden_Pct'],
-            locationmode="USA-states",
-            colorscale="magma",
+            locationmode="USA-states", colorscale="magma",
             zmin=0, zmax=max_burden,
-            colorbar=dict(title="Median %", x=1.02, len=0.3, y=0.8),
+            colorbar=dict(title="Median %", x=1.02, len=0.45, y=0.70),
             hovertemplate=(
-                "<b>%{location}</b><br>Elec: %{z:.2f}%<extra></extra>"
+                "<b>%{location}</b><br>"
+                "Elec: %{z:.2f}%<extra></extra>"
             )
-        ),
-        row=1, col=2
+        ), row=1, col=2
     )
 
-    # --- ROW 2: THE BAR CHART ---
     fig.add_trace(go.Bar(
-        y=state_burden['state_postal'],
-        x=state_burden['Total_Burden_Pct'],
-        name='Total Energy Burden',
-        orientation='h',
+        y=state_burden['state_postal'], x=state_burden['Total_Burden_Pct'],
+        name='Total Energy Burden', orientation='h',
         marker=dict(color='lightgray'),
         hovertemplate="Total Burden: %{x:.2f}%<extra></extra>"
     ), row=2, col=1)
 
     fig.add_trace(go.Bar(
-        y=state_burden['state_postal'],
-        x=state_burden['Electric_Burden_Pct'],
-        name='Electric Burden Only',
-        orientation='h',
+        y=state_burden['state_postal'], x=state_burden['Electric_Burden_Pct'],
+        name='Electric Burden Only', orientation='h',
         marker=dict(color='#636EFA'),
         hovertemplate="Electric Burden: %{x:.2f}%<extra></extra>"
     ), row=2, col=1)
 
-    # --- LAYOUT & STYLING ---
     fig.update_layout(
-        height=1600,
-        barmode='overlay',  # Overlays the electric bars onto total bars
+        dragmode="pan",
+        height=1200, barmode='overlay',
         geo=dict(scope='usa', projection_type='albers usa'),
         geo2=dict(scope='usa', projection_type='albers usa'),
-        margin={"r": 20, "t": 60, "l": 20, "b": 100},  # Extra bottom margin
+        margin={"r": 0, "t": 40, "l": 0, "b": 60},
         legend=dict(
-            orientation="h",
-            yanchor="top",
-            y=-0.04,  # Moved below the bar plot to prevent crowding
-            xanchor="center",
-            x=0.5
+            orientation="h", yanchor="top", y=-0.04, xanchor="center", x=0.5
         )
     )
 
-    # Add specific axes labels for the bar chart
     fig.update_xaxes(
         title_text="Median Energy Burden (% of Income)",
-        domain=[0.15, 0.85],  # Narrowed the bar chart width
-        row=2, col=1
+        domain=[0.20, 0.90], row=2, col=1
     )
     fig.update_yaxes(title_text="State", row=2, col=1)
 
     html_maps_path = f"{output_dir}/energy_burden_maps_bar.html"
     fig.write_html(
-        html_maps_path,
-        default_width='95%',
-        default_height='100%'
+        html_maps_path, default_width='95%', default_height='100%',
+        config={'scrollZoom': True}
     )
     print(f" -> Success! Energy burden HTML saved to {html_maps_path}")
 
@@ -233,13 +212,12 @@ def plot_fuel_price_ratio(eia_key, output_dir):
 
     def get_elec_data(sector_id, col_name):
         params = {
-            "frequency": "annual",
-            "data[0]": "price",
-            "facets[sectorid][]": sector_id,
-            "start": "2018",
-            "length": 5000
+            "frequency": "annual", "data[0]": "price",
+            "facets[sectorid][]": sector_id, "start": "2018", "length": 5000
         }
-        df = fetch_eia_v2_data("electricity/retail-sales/data/", params, eia_key)
+        df = fetch_eia_v2_data(
+            "electricity/retail-sales/data/", params, eia_key
+        )
         df = df[df['stateid'] != 'US'].copy()
         df['price'] = pd.to_numeric(df['price'], errors='coerce')
         df = df.dropna(subset=['price'])
@@ -251,11 +229,8 @@ def plot_fuel_price_ratio(eia_key, output_dir):
 
     def get_ng_data(process_id, col_name):
         params = {
-            "frequency": "annual",
-            "data[0]": "value",
-            "facets[process][]": process_id,
-            "start": "2018",
-            "length": 5000
+            "frequency": "annual", "data[0]": "value",
+            "facets[process][]": process_id, "start": "2018", "length": 5000
         }
         df = fetch_eia_v2_data("natural-gas/pri/sum/data/", params, eia_key)
         df['value'] = pd.to_numeric(df['value'], errors='coerce')
@@ -288,12 +263,12 @@ def plot_fuel_price_ratio(eia_key, output_dir):
 
     max_states = state_counts.max()
     target_year = max(state_counts[state_counts == max_states].index.tolist())
-
     df_final = df_merged[df_merged['Year'] == target_year].copy()
-    # 1 kWh = 0.003412 MMBtu, 1 Mcf ~ 1.032 MMBtu
+
     df_final['Elec_Dol_MMBtu_RES'] = (
         df_final['Elec_Cents_kWh_RES'] / 100
     ) / 0.003412
+
     df_final['NG_Dol_MMBtu_RES'] = df_final['NG_Dol_Mcf_RES'] / 1.032
     df_final['Ratio_RES'] = (
         df_final['Elec_Dol_MMBtu_RES'] / df_final['NG_Dol_MMBtu_RES']
@@ -302,43 +277,47 @@ def plot_fuel_price_ratio(eia_key, output_dir):
     df_final['Elec_Dol_MMBtu_COM'] = (
         df_final['Elec_Cents_kWh_COM'] / 100
     ) / 0.003412
+
     df_final['NG_Dol_MMBtu_COM'] = df_final['NG_Dol_Mcf_COM'] / 1.032
     df_final['Ratio_COM'] = (
         df_final['Elec_Dol_MMBtu_COM'] / df_final['NG_Dol_MMBtu_COM']
     )
-
     df_final = df_final.sort_values('Ratio_RES', ascending=True)
 
-    # ==========================================
-    # BUILD COMBINED DASHBOARD
-    # ==========================================
     fig = make_subplots(
         rows=2, cols=2,
-        row_heights=[0.3, 0.7],
-        vertical_spacing=0.15,  # Increased to create more gap below maps
-        horizontal_spacing=0.05,  # <-- This pulls the maps right next to each other
+        row_heights=[0.6, 0.4],
+        vertical_spacing=0.15,
+        horizontal_spacing=0.05,
         specs=[
             [{'type': 'choropleth'}, {'type': 'choropleth'}],
             [{'type': 'bar', 'colspan': 2}, None]
         ],
         subplot_titles=(
-            (f"Residential Customers, {target_year}<br>"
-             "<sup>Source: EIA Surveys</sup>"),
-            (f"Commercial Customers, {target_year}<br>"
-             "<sup>Source: EIA Surveys</sup>"),
-            (f"Electric vs. Gas Price Ratio by State, {target_year}<br>"
-             "<sup>Source: EIA Surveys</sup>")
+            f"Residential Customers, {target_year}<br>"
+            "<sup>Source: EIA Surveys</sup>",
+            f"Commercial Customers, {target_year}<br>"
+            "<sup>Source: EIA Surveys</sup>",
+            f"Electric vs. Gas Price Ratio by State, {target_year}<br>"
+            "<sup>Source: EIA</sup>"
         )
     )
 
-    # --- ROW 1: THE MAPS ---
+    annotations = list(fig.layout.annotations)
+    annotations[0].yshift = -20
+    annotations[1].yshift = -20
+    annotations[2].x = 0.55
+    fig.layout.annotations = annotations
+
     fig.add_trace(
         go.Choropleth(
             locations=df_final['State'], z=df_final['Ratio_RES'],
             locationmode="USA-states", colorscale="viridis",
             colorbar=dict(title="Elec/Gas<br>Price Ratio", x=0.46,
-                          len=0.3, y=0.8),
-            hovertemplate="<b>%{location}</b><br>Res: %{z:.2f}x<extra></extra>"
+                          len=0.45, y=0.70),
+            hovertemplate=(
+                "<b>%{location}</b><br>Res: %{z:.2f}x<extra></extra>"
+            )
         ), row=1, col=1
     )
 
@@ -347,12 +326,13 @@ def plot_fuel_price_ratio(eia_key, output_dir):
             locations=df_final['State'], z=df_final['Ratio_COM'],
             locationmode="USA-states", colorscale="plasma",
             colorbar=dict(title="Elec/Gas<br>Price Ratio", x=1.02,
-                          len=0.3, y=0.8),
-            hovertemplate="<b>%{location}</b><br>Com: %{z:.2f}x<extra></extra>"
+                          len=0.45, y=0.70),
+            hovertemplate=(
+                "<b>%{location}</b><br>Com: %{z:.2f}x<extra></extra>"
+            )
         ), row=1, col=2
     )
 
-    # --- ROW 2: THE BAR CHART ---
     fig.add_trace(go.Bar(
         y=df_final['State'], x=df_final['Ratio_RES'],
         name='Residential Customers', orientation='h',
@@ -367,31 +347,26 @@ def plot_fuel_price_ratio(eia_key, output_dir):
         hovertemplate="Commercial: %{x:.2f}x<extra></extra>"
     ), row=2, col=1)
 
-    # --- LAYOUT & STYLING ---
     fig.update_layout(
-        height=1600,
-        barmode='group',
+        dragmode="pan",
+        height=1200, barmode='group',
         geo=dict(scope='usa', projection_type='albers usa'),
         geo2=dict(scope='usa', projection_type='albers usa'),
-        margin={"r": 20, "t": 60, "l": 20, "b": 100},  # Extra bottom margin
+        margin={"r": 0, "t": 40, "l": 0, "b": 60},
         legend=dict(
-            orientation="h",
-            yanchor="top",
-            y=-0.04,  # Moved below the bar plot to prevent crowding
-            xanchor="center",
-            x=0.5
+            orientation="h", yanchor="top", y=-0.04, xanchor="center", x=0.5
         )
     )
 
-    # Narrow the Bar Chart Domain (pulls the sides in to 15% and 85%)
-    fig.update_xaxes(title_text="Price Ratio", domain=[0.15, 0.85], row=2, col=1)
+    fig.update_xaxes(
+        title_text="Price Ratio", domain=[0.20, 0.90], row=2, col=1
+    )
     fig.update_yaxes(title_text="State", row=2, col=1)
 
     html_maps_path = f"{output_dir}/fuel_price_ratio_maps_bar.html"
     fig.write_html(
-        html_maps_path,
-        default_width='95%',
-        default_height='100%'
+        html_maps_path, default_width='95%', default_height='100%',
+        config={'scrollZoom': True}
     )
     print(f" -> Success! Fuel price HTML saved to {html_maps_path}")
 
@@ -418,9 +393,7 @@ def fetch_and_clean_census_regions():
 
     def extract_metrics(excel_bytes, sheet_index):
         df = pd.read_excel(
-            io.BytesIO(excel_bytes),
-            sheet_name=sheet_index,
-            header=None
+            io.BytesIO(excel_bytes), sheet_name=sheet_index, header=None
         )
         latest_year = 0
         val_sf, val_mf = 0.0, 0.0
@@ -436,12 +409,8 @@ def fetch_and_clean_census_regions():
         return val_sf, val_mf, latest_year
 
     for sheet_idx, region_name in regions.items():
-        auth_sf, auth_mf, auth_year = extract_metrics(
-            r_auth.content, sheet_idx
-        )
-        comp_sf, comp_mf, comp_year = extract_metrics(
-            r_comp.content, sheet_idx
-        )
+        auth_sf, auth_mf, auth_year = extract_metrics(r_auth.content, sheet_idx)
+        comp_sf, comp_mf, comp_year = extract_metrics(r_comp.content, sheet_idx)
         reporting_year = max(reporting_year, auth_year, comp_year)
 
         master_data[region_name] = {
@@ -458,9 +427,6 @@ def plot_permits_construction(census_key, output_dir):
     """Permits, cost maps, detailed cost breakdown, and build duration."""
     print("Plotting: Housing permits and costs (Census BPS/SOC)...")
 
-    # ==========================================
-    # 1. LOAD MAP DATA (GeoJSON, BPS, Pop)
-    # ==========================================
     base_url = 'https://raw.githubusercontent.com/plotly/datasets/master/'
     geojson_url = f'{base_url}geojson-counties-fips.json'
 
@@ -520,8 +486,7 @@ def plot_permits_construction(census_key, output_dir):
                 p_data = resp.json()
                 df_pop = pd.DataFrame(p_data[1:], columns=p_data[0])
                 df_pop['FIPS'] = (
-                    df_pop['state'].str.zfill(2) +
-                    df_pop['county'].str.zfill(3)
+                    df_pop['state'].str.zfill(2) + df_pop['county'].str.zfill(3)
                 )
                 df_pop['Population'] = pd.to_numeric(
                     df_pop['B01003_001E'], errors='coerce'
@@ -551,9 +516,6 @@ def plot_permits_construction(census_key, output_dir):
     min_c = df_v['Cost'].min()
     max_c = df_v['Cost'].quantile(0.95)
 
-    # ==========================================
-    # 2. LOAD NAHB COST BREAKDOWN DATA
-    # ==========================================
     try:
         df_full = pd.read_csv('input_data/cost_comps_full.csv')
         df_overhead = pd.read_csv('input_data/cost_comps_overhead.csv')
@@ -568,52 +530,40 @@ def plot_permits_construction(census_key, output_dir):
 
     def get_clean_label(label):
         label = re.sub(r'^[A-Z]+\.\s*', '', label)
-        label = re.sub(r'^[IVX]+\.\s*', '', label)
-        return re.sub(r'\s*\(.*\)', '', label).strip()
+        return re.sub(r'^[IVX]+\.\s*', '', label).strip()
 
     cost_const = get_clean_cost(df_overhead.iloc[1].iloc[5])
     non_const_indices = [0, 2, 3, 4, 5, 6]
     cost_non_const = sum([
-        get_clean_cost(df_overhead.iloc[i].iloc[5])
-        for i in non_const_indices
+        get_clean_cost(df_overhead.iloc[i].iloc[5]) for i in non_const_indices
     ])
 
     df1 = pd.DataFrame([
-        {
-            'Label': 'Total Construction Costs',
-            'Cost': cost_const,
-            'Group': 'Const'
-        },
-        {
-            'Label': 'Non-Construction Costs',
-            'Cost': cost_non_const,
-            'Group': 'Non-Const'
-        }
+        {'Label': 'Total Const. Costs', 'Cost': cost_const, 'Group': 'Const'},
+        {'Label': 'Non-Const. Costs', 'Cost': cost_non_const, 'Group': 'Non'}
     ]).sort_values('Cost', ascending=False)
 
     const_indices = [0, 6, 9, 15, 20, 25, 37, 43]
     const_sub = []
     for i in const_indices:
-        row = df_full.iloc[i]
         const_sub.append({
-            'Label': get_clean_label(row.iloc[0]),
-            'Cost': get_clean_cost(row.iloc[5]),
+            'Label': get_clean_label(df_full.iloc[i].iloc[0]),
+            'Cost': get_clean_cost(df_full.iloc[i].iloc[5]),
             'Group': 'Const'
         })
 
     non_const_sub = []
     for i in non_const_indices:
-        row = df_overhead.iloc[i]
         non_const_sub.append({
-            'Label': get_clean_label(row.iloc[0]),
-            'Cost': get_clean_cost(row.iloc[5]),
-            'Group': 'Non-Const'
+            'Label': get_clean_label(df_overhead.iloc[i].iloc[0]),
+            'Cost': get_clean_cost(df_overhead.iloc[i].iloc[5]),
+            'Group': 'Non'
         })
 
     df2 = pd.DataFrame(const_sub + non_const_sub)
     df2_sorted = pd.concat([
         df2[df2['Group'] == 'Const'].sort_values('Cost', ascending=False),
-        df2[df2['Group'] == 'Non-Const'].sort_values('Cost', ascending=False)
+        df2[df2['Group'] == 'Non'].sort_values('Cost', ascending=False)
     ])
 
     total_price = cost_const + cost_non_const
@@ -622,10 +572,8 @@ def plot_permits_construction(census_key, output_dir):
         df_source['Percent'] = df_source['Cost'] / total * 100
         df_source['LegendLabel'] = df_source.apply(
             lambda x: (
-                f"{x['Label']} (${x['Cost']/1000:.0f}K - "
-                f"{x['Percent']:.0f}%)"
-            ),
-            axis=1
+                f"{x['Label']} (${x['Cost']/1000:.0f}K - {x['Percent']:.0f}%)"
+            ), axis=1
         )
         return df_source
 
@@ -635,47 +583,39 @@ def plot_permits_construction(census_key, output_dir):
     cmap_red = plt.get_cmap('Reds')
     cmap_blue = plt.get_cmap('Blues')
 
-    reds = [
+    df2_sorted['Color'] = [
         mcolors.to_hex(cmap_red(x))
         for x in np.linspace(0.4, 0.9, len(df2[df2['Group'] == 'Const']))
-    ]
-    blues = [
+    ] + [
         mcolors.to_hex(cmap_blue(x))
-        for x in np.linspace(0.4, 0.9, len(df2[df2['Group'] == 'Non-Const']))
+        for x in np.linspace(0.4, 0.9, len(df2[df2['Group'] == 'Non']))
     ]
-    df2_sorted['Color'] = reds + blues
 
-    # ==========================================
-    # 3. LOAD CENSUS SOC DURATION DATA
-    # ==========================================
     parsed_soc = fetch_and_clean_census_regions()
     if parsed_soc:
         soc_data, regions_list, soc_year = parsed_soc
         x_soc = [
             [reg for reg in regions_list for _ in range(2)],
-            ["Single-<br>Family", "Multi-<br>Family"] * len(regions_list)
+            ["SF", "MF"] * len(regions_list)
         ]
 
         y_soc_auth = []
         y_soc_build = []
         for reg in regions_list:
-            y_soc_auth.extend([
-                soc_data[reg]["SF_Auth"], soc_data[reg]["MF_Auth"]
-            ])
-            y_soc_build.extend([
-                soc_data[reg]["SF_Build"], soc_data[reg]["MF_Build"]
-            ])
+            y_soc_auth.extend(
+                [soc_data[reg]["SF_Auth"], soc_data[reg]["MF_Auth"]]
+            )
+            y_soc_build.extend(
+                [soc_data[reg]["SF_Build"], soc_data[reg]["MF_Build"]]
+            )
     else:
         soc_year = "Data Unavailable"
 
-    # ==========================================
-    # 4. BUILD DASHBOARD
-    # ==========================================
     fig = make_subplots(
         rows=2, cols=2,
         row_heights=[0.6, 0.4],
-        vertical_spacing=0.12,
-        horizontal_spacing=0.08,
+        vertical_spacing=0.15,
+        horizontal_spacing=0.15,
         specs=[
             [{'type': 'choropleth'}, {'type': 'choropleth'}],
             [{'type': 'bar'}, {'type': 'bar'}]
@@ -685,20 +625,23 @@ def plot_permits_construction(census_key, output_dir):
             "<sup>Source: Census BPS</sup>",
             f"New Housing Construction Cost, {target_year}<br>"
             "<sup>Source: Census BPS</sup>",
-            f"Average Build Duration by Region, {soc_year}<br>"
+            f"Average Build Duration, {soc_year}<br>"
             "<sup>Source: Census SOC</sup>",
-            "Typical New Single Family Home: Sale Price Breakdown, 2024<br>"
-            "<sup>Source: NAHB</sup>"
+            "Typical New SFH: Sale Price, 2024<br><sup>Source: NAHB</sup>"
         )
     )
 
-    # --- MAPS (Row 1) ---
+    annotations = list(fig.layout.annotations)
+    annotations[0].yshift = -20
+    annotations[1].yshift = -20
+    fig.layout.annotations = annotations
+
     fig.add_trace(
         go.Choropleth(
             geojson=counties, locations=df_v['FIPS'],
             z=df_v['Permits_1k'], colorscale="Inferno",
             zmin=0, zmax=max_p, marker_line_width=0,
-            colorbar=dict(title="Permits/1k", x=0.46, len=0.35, y=0.8),
+            colorbar=dict(title="Permits/1k", x=0.46, len=0.45, y=0.75),
             customdata=df_v[['Name', 'Units', 'Population']],
             hovertemplate=(
                 "<b>%{customdata[0]}</b><br>"
@@ -712,7 +655,7 @@ def plot_permits_construction(census_key, output_dir):
             geojson=counties, locations=df_v['FIPS'],
             z=df_v['Cost'], colorscale="Inferno",
             zmin=min_c, zmax=max_c, marker_line_width=0,
-            colorbar=dict(title="Avg Cost ($)", x=1.02, len=0.35, y=0.8),
+            colorbar=dict(title="Avg Cost ($)", x=1.02, len=0.45, y=0.75),
             customdata=df_v[['Name', 'Units']],
             hovertemplate=(
                 "<b>%{customdata[0]}</b><br>"
@@ -721,144 +664,105 @@ def plot_permits_construction(census_key, output_dir):
         ), row=1, col=2
     )
 
-    # --- DURATION BAR CHART (Row 2, Col 1 - FLIPPED) ---
     if parsed_soc:
-        # Calculate the totals for the data labels
         y_soc_total = [a + b for a, b in zip(y_soc_auth, y_soc_build)]
         max_duration = max(y_soc_total) if y_soc_total else 20
 
-        fig.add_trace(
-            go.Bar(
-                x=x_soc, y=y_soc_auth,
-                name="Permit to Start", marker_color="#F6B26B",
-                hovertemplate=(
-                    "%{x[0]} - %{x[1]}<br>"
-                    "<b>Permit to Start:</b> %{y} Months<extra></extra>"
-                ),
-                legend="legend2"
-            ), row=2, col=1
-        )
+        fig.add_trace(go.Bar(
+            x=x_soc, y=y_soc_auth, name="Permit to Start",
+            marker_color="#F6B26B",
+            hovertemplate=(
+                "%{x[0]} - %{x[1]}<br>"
+                "<b>Permit to Start:</b> %{y} Months<extra></extra>"
+            ),
+            legend="legend2"
+        ), row=2, col=1)
 
-        fig.add_trace(
-            go.Bar(
-                x=x_soc, y=y_soc_build,
-                name="Start to Completion", marker_color="#3D85C6",
-                text=[f"{val:.1f}" for val in y_soc_total],  # Provide the totals
-                textposition="outside",                      # Place them on top
-                textfont=dict(size=10, color="black"),       # Styling
-                hovertemplate=(
-                    "%{x[0]} - %{x[1]}<br>"
-                    "<b>Start to Completion:</b> %{y} Months<extra></extra>"
-                ),
-                legend="legend2"
-            ), row=2, col=1
-        )
+        fig.add_trace(go.Bar(
+            x=x_soc, y=y_soc_build, name="Start to Completion",
+            marker_color="#3D85C6",
+            text=[f"{val:.1f}" for val in y_soc_total],
+            textposition="outside", textfont=dict(size=10, color="black"),
+            hovertemplate=(
+                "%{x[0]} - %{x[1]}<br>"
+                "<b>Start to Completion:</b> %{y} Months<extra></extra>"
+            ),
+            legend="legend2"
+        ), row=2, col=1)
 
-    # --- COST BAR CHART (Row 2, Col 2 - FLIPPED) ---
     colors1 = {
-        'Total Construction Costs': '#E57373',
-        'Non-Construction Costs': '#64B5F6'
+        'Total Const. Costs': '#E57373', 'Non-Const. Costs': '#64B5F6'
     }
 
     for _, row in df1.iterrows():
-        fig.add_trace(
-            go.Bar(
-                x=[row['Cost']], y=['High Level'],
-                name=row['LegendLabel'], orientation='h',
-                marker=dict(color=colors1.get(row['Label'], '#E57373')),
-                legendgroup='High Level',
-                hovertemplate=(
-                    f"<b>{row['Label']}</b><br>"
-                    f"Cost: ${row['Cost']/1000:.0f}K<br>"
-                    f"Share: {row['Percent']:.1f}%<extra></extra>"
-                ),
-                legend="legend"
-            ), row=2, col=2
-        )
+        fig.add_trace(go.Bar(
+            x=[row['Cost']], y=['High Level'], name=row['LegendLabel'],
+            orientation='h',
+            marker=dict(color=colors1.get(row['Label'], '#E57373')),
+            legendgroup='High Level',
+            hovertemplate=(
+                f"<b>{row['Label']}</b><br>"
+                f"Cost: ${row['Cost']/1000:.0f}K<br>"
+                f"Share: {row['Percent']:.1f}%<extra></extra>"
+            ),
+            legend="legend"
+        ), row=2, col=2)
 
     for _, row in df2_sorted.iterrows():
-        fig.add_trace(
-            go.Bar(
-                x=[row['Cost']], y=['Detailed'],
-                name=row['LegendLabel'], orientation='h',
-                marker=dict(color=row['Color']),
-                legendgroup='Detailed Breakdown',
-                hovertemplate=(
-                    f"<b>{row['Label']}</b><br>"
-                    f"Cost: ${row['Cost']/1000:.0f}K<br>"
-                    f"Share: {row['Percent']:.1f}%<extra></extra>"
-                ),
-                legend="legend"
-            ), row=2, col=2
-        )
+        fig.add_trace(go.Bar(
+            x=[row['Cost']], y=['Detailed'], name=row['LegendLabel'],
+            orientation='h', marker=dict(color=row['Color']),
+            legendgroup='Detailed Breakdown',
+            hovertemplate=(
+                f"<b>{row['Label']}</b><br>"
+                f"Cost: ${row['Cost']/1000:.0f}K<br>"
+                f"Share: {row['Percent']:.1f}%<extra></extra>"
+            ),
+            legend="legend"
+        ), row=2, col=2)
 
-    # --- LAYOUT & STYLING ---
     fig.update_layout(
+        dragmode="pan",
         height=1400, barmode='stack',
         geo=dict(scope='usa', projection_type='albers usa'),
         geo2=dict(scope='usa', projection_type='albers usa'),
-        margin={"r": 20, "t": 60, "l": 20, "b": 150},
-
-        # NAHB Legend (Anchored under the right-side plot)
+        margin={"r": 0, "t": 60, "l": 0, "b": 150},
         legend=dict(
-            orientation="h", yanchor="top", y=-0.12,
-            xanchor="right", x=1.0,
-            groupclick="toggleitem",
-            title_text="<b>Cost Components</b>"
+            orientation="v", yanchor="top", y=-0.06, xanchor="center", x=0.79,
+            groupclick="toggleitem", title_text="<b>Cost Components</b>"
         ),
-
-        # SOC Duration Legend (Anchored under the left-side plot)
         legend2=dict(
-            orientation="h", yanchor="top", y=-0.12,
-            xanchor="left", x=0.0,
+            orientation="v", yanchor="top", y=-0.06, xanchor="center", x=0.30,
             title_text="<b>Build Phase</b>"
         )
     )
 
     fig.update_yaxes(
-        categoryorder='array',
-        categoryarray=['Detailed', 'High Level'],
-        ticksuffix="&nbsp;&nbsp;&nbsp;&nbsp;",
-        row=2, col=2
+        categoryorder='array', categoryarray=['Detailed', 'High Level'],
+        ticksuffix="&nbsp;&nbsp;&nbsp;&nbsp;", row=2, col=2
     )
 
-    # Adjust domain distributions:
-    # Col 1 (Duration) gets ~35%, Col 2 (Costs) gets ~55% to fit large text
-    fig.update_xaxes(
-        domain=[0.0, 0.35], tickangle=0, row=2, col=1
-    )
-    fig.update_xaxes(
-        domain=[0.45, 1.0], row=2, col=2
-    )
+    # Adding to the left margin, expanding to the right to visually center
+    fig.update_xaxes(domain=[0.15, 0.45], tickangle=0, row=2, col=1)
+    fig.update_xaxes(domain=[0.60, 0.98], row=2, col=2)
 
-    # Set the range dynamically to leave 15% headroom for the new text labels
     fig.update_yaxes(
-        title_text="Total Duration (Months)",
-        dtick=4,
-        range=[0, max_duration * 1.15] if parsed_soc else None,
-        row=2, col=1
+        title_text="Total Duration (Months)", dtick=4,
+        range=[0, max_duration * 1.15] if parsed_soc else None, row=2, col=1
     )
 
-    # make_subplots generates annotations for titles in order:
-    # [0]: Top Left, [1]: Top Right, [2]: Bottom Left, [3]: Bottom Right
     annotations = list(fig.layout.annotations)
-
-    # Move Bottom Left title to the center of domain [0.0, 0.35]
-    annotations[2].x = 0.175
-
-    # Move Bottom Right title to the center of domain [0.45, 1.0]
-    annotations[3].x = 0.725
-
+    annotations[2].x = 0.30
+    annotations[3].x = 0.79
     fig.update_layout(annotations=annotations)
-    # -------------------------------------
 
-    # Ensure output directory exists before saving
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
 
     html_maps_path = f"{output_dir}/permits_construction_costs.html"
     fig.write_html(
-        html_maps_path, default_width='95%', default_height='100%'
+        html_maps_path, default_width='95%', default_height='100%',
+        config={'scrollZoom': True}
     )
     print(f" -> Success! Construction HTML saved to {html_maps_path}")
 
@@ -867,7 +771,6 @@ def plot_county_heating_equipment(census_key, output_dir):
     """Electric heating penetration and shift to/from electric heating fuel."""
     print("Plotting: County-Level heating equipment (Census ACS)...")
 
-    # 1. Load the GeoJSON file for US Counties required by Plotly
     geojson_url = (
         'https://raw.githubusercontent.com/plotly/datasets/master/'
         'geojson-counties-fips.json'
@@ -879,13 +782,11 @@ def plot_county_heating_equipment(census_key, output_dir):
         print(f"\n[WARNING] Failed to download county GeoJSON. Error: {e}")
         return
 
-    # Helper function to fetch ACS Heating Fuel Data
     def get_heating_data(year):
         url = f"https://api.census.gov/data/{year}/acs/acs5"
         params = {
             "get": "NAME,B25040_001E,B25040_004E",
-            "for": "county:*",
-            "key": census_key
+            "for": "county:*", "key": census_key
         }
         resp = requests.get(url, params=params, timeout=20)
         if resp.status_code != 200:
@@ -905,10 +806,8 @@ def plot_county_heating_equipment(census_key, output_dir):
 
         mask = (pd.to_numeric(df['state'], errors='coerce') < 60) & \
                (df['Total_HH'] > 0)
-        df = df[mask].copy()
-        return df[['FIPS', 'NAME', 'Total_HH', 'Electric_HH']]
+        return df[mask][['FIPS', 'NAME', 'Total_HH', 'Electric_HH']].copy()
 
-    # 2. Fetch Latest and Base (4-yr lag) ACS heating data
     curr_year = pd.Timestamp.now().year
     df_latest = None
     while curr_year >= 2020:
@@ -930,21 +829,16 @@ def plot_county_heating_equipment(census_key, output_dir):
         print("\n[WARNING] Could not complete API calls. Skipping map.")
         return
 
-    # 3. Apply Connecticut Crosswalk Patch to 2024 Data BEFORE Merging
     ct_crosswalk = {
         '09110': '09003', '09120': '09001', '09130': '09007',
         '09140': '09009', '09150': '09015', '09160': '09005',
         '09170': '09009', '09180': '09011', '09190': '09001'
     }
     df_latest['FIPS'] = df_latest['FIPS'].replace(ct_crosswalk)
-
     df_latest = df_latest.groupby('FIPS', as_index=False).agg({
-        'NAME': 'first',
-        'Total_HH': 'sum',
-        'Electric_HH': 'sum'
+        'NAME': 'first', 'Total_HH': 'sum', 'Electric_HH': 'sum'
     })
 
-    # 4. Merge and Calculate the Electrification Shift
     df_merged = pd.merge(
         df_prev, df_latest, on='FIPS', suffixes=('_20', '_24'), how='inner'
     )
@@ -964,70 +858,65 @@ def plot_county_heating_equipment(census_key, output_dir):
         abs(df_merged['Shift_Pct'].quantile(0.98))
     )
 
-    # 5. Build the Side-by-Side Choropleth Maps
     fig_maps = make_subplots(
-        rows=1, cols=2,
-        horizontal_spacing=0.05,  # <-- This pulls the maps right next to each other
+        rows=1, cols=2, horizontal_spacing=0.05,
         specs=[[{'type': 'choropleth'}, {'type': 'choropleth'}]],
-        subplot_titles=((f"Residential Electric Heating Penetration, {latest_yr}<br>"
-                         "<sup>Source: Census ACS</sup>"),
-                        (f"Electric Shift From Previous Survey, {latest_yr} vs. {base_year}<br>"
-                         "<sup>Source: Census ACS</sup>"))
+        subplot_titles=(
+            f"Residential Electric Heating Penetration, {latest_yr}<br>"
+            "<sup>Source: Census ACS</sup>",
+            f"Electric Shift From Previous Survey, {latest_yr} vs. {base_year}"
+            "<br><sup>Source: Census ACS</sup>"
+        )
     )
 
-    # Left Panel: 2024 Baseline Percentage
     fig_maps.add_trace(
         go.Choropleth(
-            geojson=counties,
-            locations=df_merged['FIPS'],
-            z=df_merged['Pct_Electric_24'],
-            colorscale="Viridis",
-            zmin=0, zmax=100,
-            marker_line_width=0,
+            geojson=counties, locations=df_merged['FIPS'],
+            z=df_merged['Pct_Electric_24'], colorscale="Viridis",
+            zmin=0, zmax=100, marker_line_width=0,
             colorbar=dict(title="%", x=0.46, len=0.75),
             customdata=df_merged[['NAME_24', 'Pct_Electric_20']],
             hovertemplate=(
-                "<b>%{customdata[0]}</b><br>"
-                "2020 Base: %{customdata[1]:.1f}%<br>"
-                "2024 Base: <b>%{z:.1f}%</b><extra></extra>"
+                "<b>%{customdata[0]}</b><br>2020 Base: %{customdata[1]:.1f}%"
+                "<br>2024 Base: <b>%{z:.1f}%</b><extra></extra>"
             )
-        ),
-        row=1, col=1
+        ), row=1, col=1
     )
 
-    # Right Panel: The Shift
     fig_maps.add_trace(
         go.Choropleth(
-            geojson=counties,
-            locations=df_merged['FIPS'],
-            z=df_merged['Shift_Pct'],
-            colorscale="RdBu",
-            zmin=-abs_max, zmax=abs_max,
-            marker_line_width=0,
+            geojson=counties, locations=df_merged['FIPS'],
+            z=df_merged['Shift_Pct'], colorscale="RdBu",
+            zmin=-abs_max, zmax=abs_max, marker_line_width=0,
             colorbar=dict(title="%", x=1.02, len=0.75),
             customdata=df_merged[
                 ['NAME_24', 'Pct_Electric_20', 'Pct_Electric_24']
             ],
             hovertemplate=(
-                "<b>%{customdata[0]}</b><br>"
-                "2020 Base: %{customdata[1]:.1f}%<br>"
-                "2024 Base: %{customdata[2]:.1f}%<br>"
+                "<b>%{customdata[0]}</b><br>2020 Base: %{customdata[1]:.1f}%"
+                "<br>2024 Base: %{customdata[2]:.1f}%<br>"
                 "Net Shift: <b>%{z:+.2f}%</b><extra></extra>"
             )
-        ),
-        row=1, col=2
+        ), row=1, col=2
     )
+
+    annotations = list(fig_maps.layout.annotations)
+    annotations[0].yshift = -20
+    annotations[1].yshift = -20
+    fig_maps.layout.annotations = annotations
 
     fig_maps.update_layout(
+        dragmode="pan",
         geo=dict(scope='usa', projection_type='albers usa'),
         geo2=dict(scope='usa', projection_type='albers usa'),
-        margin={"r": 0, "t": 60, "l": 0, "b": 0}
+        margin={"r": 0, "t": 60, "l": 0, "b": 0}, height=700
     )
 
-    # Save the Interactive HTML
     html_path = f"{output_dir}/heating_equip_map.html"
-    # Setting both to 100% ensures it perfectly fills the iframe container
-    fig_maps.write_html(html_path, default_width='100%', default_height='100%')
+    fig_maps.write_html(
+        html_path, default_width='100%', default_height='100%',
+        config={'scrollZoom': True}
+    )
     print(f" -> Success! Heating equipment map HTML saved to {html_path}")
 
 
@@ -1035,7 +924,6 @@ def plot_ann_elec_sales(output_dir):
     """Annual electricity demand and change over time."""
     print("Plotting: Annual electricity demand growth (EIA 861)...")
 
-    # State Centroids for Map Plotting
     state_centroids = {
         'AL': (32.8, -86.7), 'AK': (61.3, -152.4), 'AZ': (33.7, -111.4),
         'AR': (34.9, -92.3), 'CA': (36.1, -119.6), 'CO': (39.0, -105.3),
@@ -1059,7 +947,8 @@ def plot_ann_elec_sales(output_dir):
     def extract_sales_data(year):
         urls = [
             f"https://www.eia.gov/electricity/data/eia861/zip/f861{year}.zip",
-            f"https://www.eia.gov/electricity/data/eia861/archive/zip/f861{year}.zip"
+            ("https://www.eia.gov/electricity/data/eia861/archive/zip/"
+             f"f861{year}.zip")
         ]
         headers = {'User-Agent': 'Mozilla/5.0'}
         r = None
@@ -1077,14 +966,19 @@ def plot_ann_elec_sales(output_dir):
 
         try:
             with zipfile.ZipFile(io.BytesIO(r.content)) as z:
-                target = next((f for f in z.namelist() if 'sales_ult_cust' in f.lower()
-                               and not f.startswith('~')), None)
+                target = next(
+                    (f for f in z.namelist() if 'sales_ult_cust' in f.lower()
+                     and not f.startswith('~')), None
+                )
                 if not target:
                     return None
 
                 df = pd.read_excel(z.open(target), header=None)
-                mask = df.apply(lambda row: row.astype(str).str.contains(
-                    'Utility Number|Utility ID', case=False, na=False).any(), axis=1)
+                mask = df.apply(
+                    lambda row: row.astype(str).str.contains(
+                        'Utility Number|Utility ID', case=False, na=False
+                    ).any(), axis=1
+                )
                 header_idx = mask.index[mask][0]
 
                 super_row_idx = -1
@@ -1095,13 +989,15 @@ def plot_ann_elec_sales(output_dir):
                         break
 
                 if super_row_idx != -1:
-                    top_row = df.iloc[super_row_idx].astype(str).str.strip().replace(
-                        ['nan', 'None', ''], pd.NA).ffill().fillna('')
-                    bottom_row = df.iloc[header_idx].astype(str).str.strip().replace(
-                        ['nan', 'None'], '')
+                    top_row = df.iloc[super_row_idx].astype(str).str.strip().\
+                        replace(['nan', 'None', ''], pd.NA).ffill().fillna('')
+                    bottom_row = df.iloc[header_idx].astype(str).str.strip().\
+                        replace(['nan', 'None'], '')
                     combined_cols = top_row + "_" + bottom_row
                 else:
-                    combined_cols = df.iloc[header_idx].astype(str).replace('nan', '')
+                    combined_cols = df.iloc[header_idx].astype(str).replace(
+                        'nan', ''
+                    )
 
                 df.columns = combined_cols.str.lower().str.replace('\n', ' ')
                 df = df.iloc[header_idx + 1:].reset_index(drop=True)
@@ -1133,23 +1029,24 @@ def plot_ann_elec_sales(output_dir):
                     df[s] = pd.to_numeric(df[s], errors='coerce').fillna(0)
 
                 return df.groupby(
-                    ['Utility_Num', 'Utility_Name', 'State'], as_index=False).agg({
-                        'Res_Sales': 'sum', 'Com_Sales': 'sum',
-                        'Ind_Sales': 'sum', 'Tra_Sales': 'sum'})
+                    ['Utility_Num', 'Utility_Name', 'State'], as_index=False
+                ).agg({
+                    'Res_Sales': 'sum', 'Com_Sales': 'sum',
+                    'Ind_Sales': 'sum', 'Tra_Sales': 'sum'
+                })
         except Exception as e:
             print(f"Error: {e}")
             return None
 
-    # 1. Dynamically find the latest EIA-861 data years
     latest_yr = find_latest_eia_861_year()
     year_mid = latest_yr - 2
     base_year = latest_yr - 5
 
     latest_yr_suff, year_mid_suff, base_year_suff = [
-        str(x)[-2:] for x in [latest_yr, year_mid, base_year]]
+        str(x)[-2:] for x in [latest_yr, year_mid, base_year]
+    ]
 
-    print(f" -> Fetching EIA-861 data for {latest_yr}, {year_mid}, and {base_year}...")
-    # 1. Fetch Data (Already correct in your snippet)
+    print(f" -> Fetching EIA-861 for {latest_yr}, {year_mid}, {base_year}...")
     df_latest = extract_sales_data(latest_yr)
     df_mid = extract_sales_data(year_mid)
     df_base = extract_sales_data(base_year)
@@ -1157,8 +1054,6 @@ def plot_ann_elec_sales(output_dir):
     if any(df is None for df in [df_latest, df_mid, df_base]):
         return
 
-    # 2. MANUALLY RENAME COLUMNS BEFORE MERGE
-    # This prevents suffix confusion and ensures underscores are consistent
     def rename_for_year(df, suffix):
         cols_to_rename = ['Res_Sales', 'Com_Sales', 'Ind_Sales', 'Tra_Sales']
         rename_map = {c: f"{c}_{suffix}" for c in cols_to_rename}
@@ -1168,20 +1063,21 @@ def plot_ann_elec_sales(output_dir):
     df_mid_renamed = rename_for_year(df_mid, year_mid_suff)
     df_latest_renamed = rename_for_year(df_latest, latest_yr_suff)
 
-    # 3. Triple Merge (Simple unique names)
-    df_m = pd.merge(df_base_renamed, df_mid_renamed, on=['Utility_Num', 'State'])
+    df_m = pd.merge(
+        df_base_renamed, df_mid_renamed, on=['Utility_Num', 'State']
+    )
     df_m = pd.merge(df_m, df_latest_renamed, on=['Utility_Num', 'State'])
 
-    # Fix naming for Utility Name column
     if 'Utility_Name' in df_m.columns:
-        df_m = df_m.rename(columns={'Utility_Name': f'Utility_Name_{latest_yr_suff}'})
+        df_m = df_m.rename(
+            columns={'Utility_Name': f'Utility_Name_{latest_yr_suff}'}
+        )
 
-    # Calculate Utility-level Totals
     for y in [base_year_suff, year_mid_suff, latest_yr_suff]:
-        cols = [f'Res_Sales_{y}', f'Com_Sales_{y}', f'Ind_Sales_{y}', f'Tra_Sales_{y}']
+        cols = [f'Res_Sales_{y}', f'Com_Sales_{y}',
+                f'Ind_Sales_{y}', f'Tra_Sales_{y}']
         df_m[f'Total_{y}'] = df_m[cols].sum(axis=1)
 
-    # 4. State-Level Aggregates
     agg_map = {
         f'Total_{base_year_suff}': 'sum',
         f'Total_{year_mid_suff}': 'sum',
@@ -1197,54 +1093,59 @@ def plot_ann_elec_sales(output_dir):
     }
     state_all = df_m.groupby('State').agg(agg_map).reset_index()
 
-    # Calculate State Growth Rates
     state_all['State_5yr'] = (
-        (state_all[f'Total_{latest_yr_suff}'] - state_all[f'Total_{base_year_suff}']) /
+        (state_all[f'Total_{latest_yr_suff}'] -
+         state_all[f'Total_{base_year_suff}']) /
         (state_all[f'Total_{base_year_suff}'] + 1)
     ) * 100
     state_all['State_2yr'] = (
-        (state_all[f'Total_{latest_yr_suff}'] - state_all[f'Total_{year_mid_suff}']) /
+        (state_all[f'Total_{latest_yr_suff}'] -
+         state_all[f'Total_{year_mid_suff}']) /
         (state_all[f'Total_{year_mid_suff}'] + 1)
     ) * 100
 
-    # Sector Contributions for the Waterfall
     for s in ['Res', 'Com', 'Ind', 'Tra']:
         state_all[f'{s}_Contrib'] = (
-            (state_all[f'{s}_Sales_{latest_yr_suff}'] - state_all[f'{s}_Sales_{base_year_suff}']) /
+            (state_all[f'{s}_Sales_{latest_yr_suff}'] -
+             state_all[f'{s}_Sales_{base_year_suff}']) /
             (state_all[f'Total_{base_year_suff}'] + 1)
         ) * 100
 
-    # 5. Largest Utility Metrics
     df_leaders = df_m.sort_values(
         ['State', f'Total_{latest_yr_suff}'], ascending=[True, False]
     ).groupby('State').head(1).copy()
 
     df_leaders['Util_5yr'] = (
-        (df_leaders[f'Total_{latest_yr_suff}'] - df_leaders[f'Total_{base_year_suff}']) /
+        (df_leaders[f'Total_{latest_yr_suff}'] -
+         df_leaders[f'Total_{base_year_suff}']) /
         (df_leaders[f'Total_{base_year_suff}'] + 1)
     ) * 100
     df_leaders['Util_2yr'] = (
-        (df_leaders[f'Total_{latest_yr_suff}'] - df_leaders[f'Total_{year_mid_suff}']) /
+        (df_leaders[f'Total_{latest_yr_suff}'] -
+         df_leaders[f'Total_{year_mid_suff}']) /
         (df_leaders[f'Total_{year_mid_suff}'] + 1)
     ) * 100
 
-    # Mapping Prep (Avoid renaming collisions)
     df_leaders_sub = df_leaders[[
-        'State', f'Utility_Name_{latest_yr_suff}', 'Util_5yr', 'Util_2yr', f'Total_{latest_yr_suff}'
-    ]].rename(columns={f'Total_{latest_yr_suff}': f'Leader_Total_{latest_yr_suff}'})
+        'State', f'Utility_Name_{latest_yr_suff}', 'Util_5yr', 'Util_2yr',
+        f'Total_{latest_yr_suff}'
+    ]].rename(
+        columns={f'Total_{latest_yr_suff}': f'Leader_Total_{latest_yr_suff}'}
+    )
 
     df_plot = pd.merge(state_all, df_leaders_sub, on='State')
 
     def apply_loc(row):
         st = str(row['State']).upper().strip()
         if st in state_centroids:
-            return pd.Series({'Lat': state_centroids[st][0],
-                              'Lon': state_centroids[st][1]})
+            return pd.Series({
+                'Lat': state_centroids[st][0],
+                'Lon': state_centroids[st][1]
+            })
         return pd.Series({'Lat': None, 'Lon': None})
 
     df_plot[['Lat', 'Lon']] = df_plot.apply(apply_loc, axis=1).dropna()
 
-    # ENHANCED HOVER WITH ACCELERATION METRICS
     def make_hover(row):
         line1 = f"<b>STATE: {row['State']}</b><br>"
         line2 = f"Total Sales: {row[('Total_' + latest_yr_suff)]:,.0f} MWh<br>"
@@ -1257,40 +1158,38 @@ def plot_ann_elec_sales(output_dir):
 
     df_plot['HoverText'] = df_plot.apply(make_hover, axis=1)
 
-    # 6. Build Plot
     fig = make_subplots(
         rows=2, cols=1, row_heights=[0.6, 0.4], vertical_spacing=0.1,
         specs=[[{'type': 'scattergeo'}], [{'type': 'bar'}]],
-        horizontal_spacing=0.05,  # <-- This pulls the maps right next to each other
+        horizontal_spacing=0.05,
         subplot_titles=(
-            (f"Annual Electricity Sales by State in {latest_yr} and Demand Growth, "
-             f"{base_year}-{latest_yr}<br>"
-             "<sup>Source: EIA 861</sup>"),
-            (f"States with Highest Growth in Total Sales by Sector, {base_year}-{latest_yr}<br>"
-             "<sup>Source: EIA 861</sup>")
+            f"Annual Electricity Sales by State, {latest_yr}, and Growth, "
+            f"{base_year}-{latest_yr}<br><sup>Source: EIA 861</sup>",
+            f"Highest Sales Growth States by Sector, {base_year}-{latest_yr}"
+            "<br><sup>Source: EIA 861</sup>"
         )
     )
 
-    # Map
     sizeref = 2. * df_plot[('Total_' + latest_yr_suff)].max() / (65 ** 2)
     fig.add_trace(go.Scattergeo(
         lon=df_plot['Lon'], lat=df_plot['Lat'], text=df_plot['HoverText'],
-        hoverinfo='text',
-        showlegend=False,  # FIX: explicitly hide map from legend
+        hoverinfo='text', showlegend=False,
         marker=dict(
-            size=df_plot[('Total_' + latest_yr_suff)], sizemode='area', sizeref=sizeref,
-            color=df_plot['State_5yr'], colorscale='RdBu', cmin=-20, cmax=20,
-            showscale=True, colorbar=dict(title="5-yr Growth %", x=0.9,
-                                          len=0.5, y=0.75)
+            size=df_plot[('Total_' + latest_yr_suff)], sizemode='area',
+            sizeref=sizeref, color=df_plot['State_5yr'], colorscale='RdBu',
+            cmin=-20, cmax=20, showscale=True,
+            colorbar=dict(title="5-yr Growth %", x=0.9, len=0.5, y=0.75)
         )
     ), row=1, col=1)
 
-    # Waterfall
     state_sorted = state_all.sort_values('State_5yr', ascending=False).head(20)
-    colors = {'Res': '#1f77b4', 'Com': '#ff7f0e',
-              'Ind': '#2ca02c', 'Tra': '#d62728'}
-    sectors = [('Res', 'Residential'), ('Com', 'Commercial'),
-               ('Ind', 'Industrial'), ('Tra', 'Transportation')]
+    colors = {
+        'Res': '#1f77b4', 'Com': '#ff7f0e', 'Ind': '#2ca02c', 'Tra': '#d62728'
+    }
+    sectors = [
+        ('Res', 'Residential'), ('Com', 'Commercial'),
+        ('Ind', 'Industrial'), ('Tra', 'Transportation')
+    ]
 
     for s, name in sectors:
         fig.add_trace(go.Bar(
@@ -1305,16 +1204,24 @@ def plot_ann_elec_sales(output_dir):
     ), row=2, col=1)
 
     fig.update_layout(
+        dragmode="pan",
         barmode='relative', hovermode='x unified', height=1100,
-        geo=dict(scope='usa', projection_type='albers usa', showland=True,
-                 landcolor='rgb(240, 240, 240)'),
-        yaxis2=dict(title="% Net 5-yr Growth"),
-        legend=dict(orientation="h", yanchor="bottom", y=-0.1,
-                    xanchor="center", x=0.5)
+        geo=dict(
+            scope='usa', projection_type='albers usa', showland=True,
+            landcolor='rgb(220, 220, 220)'
+        ),
+        legend=dict(
+            orientation="h", yanchor="bottom", y=-0.1, xanchor="center", x=0.5
+        )
     )
 
+    fig.update_yaxes(title_text="% 5-yr Growth", row=2, col=1)
+
     html_path = f"{output_dir}/annual_sales.html"
-    fig.write_html(html_path)
+    fig.write_html(
+        html_path, default_width='100%', default_height='100%',
+        config={'scrollZoom': True}
+    )
     print(f" -> Success! Annual sales plots saved to {html_path}")
 
 
@@ -1322,7 +1229,8 @@ def extract_peak_data(year):
     """Targets Operational_Data and flattens multi-row headers."""
     urls = [
         f"https://www.eia.gov/electricity/data/eia861/zip/f861{year}.zip",
-        f"https://www.eia.gov/electricity/data/eia861/archive/zip/f861{year}.zip"
+        ("https://www.eia.gov/electricity/data/eia861/archive/zip/"
+         f"f861{year}.zip")
     ]
     headers = {'User-Agent': 'Mozilla/5.0'}
     r = None
@@ -1383,13 +1291,16 @@ def extract_peak_data(year):
                         return i
                 return None
 
-            idx_uid = find_idx(['utility', 'number']) or \
-                find_idx(['utility', 'id'])
+            idx_uid = find_idx(['utility', 'number']) or find_idx(
+                ['utility', 'id']
+            )
             idx_st = find_idx(['state'])
-            idx_sum = find_idx(['summer', 'peak']) or \
-                find_idx(['summer', 'demand']) or find_idx(['summer', 'max'])
-            idx_win = find_idx(['winter', 'peak']) or \
-                find_idx(['winter', 'demand']) or find_idx(['winter', 'max'])
+            idx_sum = find_idx(['summer', 'peak']) or find_idx(
+                ['summer', 'demand']
+            ) or find_idx(['summer', 'max'])
+            idx_win = find_idx(['winter', 'peak']) or find_idx(
+                ['winter', 'demand']
+            ) or find_idx(['winter', 'max'])
 
             if None in [idx_uid, idx_st, idx_sum, idx_win]:
                 return None
@@ -1414,7 +1325,6 @@ def plot_peak_data(output_dir):
     """Peak electricity demand and change over time."""
     print("Plotting: Peak demand growth (EIA 861))...")
 
-    # Static dictionary of US State Centroids
     state_centroids = {
         'AL': (32.8066, -86.7911), 'AK': (61.3707, -152.4044),
         'AZ': (33.7297, -111.4312), 'AR': (34.9697, -92.3731),
@@ -1447,7 +1357,9 @@ def plot_peak_data(output_dir):
     latest_yr = find_latest_eia_861_year()
     base_year = latest_yr - 5
 
-    latest_yr_suff, base_year_suff = [str(x)[-2:] for x in [latest_yr, base_year]]
+    latest_yr_suff, base_year_suff = [
+        str(x)[-2:] for x in [latest_yr, base_year]
+    ]
 
     print(f" -> Comparing Peak Data: {latest_yr} vs {base_year}...")
     df_latest = extract_peak_data(latest_yr)
@@ -1455,8 +1367,6 @@ def plot_peak_data(output_dir):
     if df_latest is None or df_base is None:
         return
 
-    # 1. MANUALLY RENAME COLUMNS BEFORE MERGE
-    # This guarantees consistent naming (e.g., Summer_MW_24, Winter_MW_24)
     def rename_peak_cols(df, suffix):
         return df.rename(columns={
             'Summer_MW': f'Summer_MW_{suffix}',
@@ -1466,15 +1376,11 @@ def plot_peak_data(output_dir):
     df_latest_renamed = rename_peak_cols(df_latest, latest_yr_suff)
     df_base_renamed = rename_peak_cols(df_base, base_year_suff)
 
-    # 2. Merge and Filter
     df_m = pd.merge(
-        df_base_renamed, df_latest_renamed,
-        on=['Util_ID', 'State']
+        df_base_renamed, df_latest_renamed, on=['Util_ID', 'State']
     )
     valid_us_states = set(state_centroids.keys())
 
-    # 3. Aggregate by State
-    # Note: We must use the exact names created in the rename function above
     st = df_m.groupby('State').agg({
         f'Summer_MW_{latest_yr_suff}': 'sum',
         f'Winter_MW_{latest_yr_suff}': 'sum',
@@ -1484,48 +1390,49 @@ def plot_peak_data(output_dir):
 
     st = st[st['State'].isin(valid_us_states)].copy()
 
-    # 4. Calculate Ratios and Growth
-    # We use the full column names (including _MW) to avoid KeyErrors
-    st['Ratio'] = st[f'Summer_MW_{latest_yr_suff}'] / (st[f'Winter_MW_{latest_yr_suff}'] + 1)
-
-    st['Max_MW'] = st[[f'Summer_MW_{latest_yr_suff}', f'Winter_MW_{latest_yr_suff}']].max(axis=1)
+    st['Ratio'] = (
+        st[f'Summer_MW_{latest_yr_suff}'] /
+        (st[f'Winter_MW_{latest_yr_suff}'] + 1)
+    )
+    st['Max_MW'] = st[
+        [f'Summer_MW_{latest_yr_suff}', f'Winter_MW_{latest_yr_suff}']
+    ].max(axis=1)
 
     st['Winter_Growth'] = (
-        (st[f'Winter_MW_{latest_yr_suff}'] - st[f'Winter_MW_{base_year_suff}']) /
+        (st[f'Winter_MW_{latest_yr_suff}'] -
+         st[f'Winter_MW_{base_year_suff}']) /
         (st[f'Winter_MW_{base_year_suff}'] + 1)
     ) * 100
 
     st['Summer_Growth'] = (
-        (st[f'Summer_MW_{latest_yr_suff}'] - st[f'Summer_MW_{base_year_suff}']) /
+        (st[f'Summer_MW_{latest_yr_suff}'] -
+         st[f'Summer_MW_{base_year_suff}']) /
         (st[f'Summer_MW_{base_year_suff}'] + 1)
     ) * 100
 
-    # 3. Setup Layout
     fig = make_subplots(
         rows=2, cols=2,
         row_heights=[0.6, 0.4],
         vertical_spacing=0.12,
-        horizontal_spacing=0.05,  # <-- This pulls the maps right next to each other
+        horizontal_spacing=0.15,
         specs=[
             [{"type": "scattergeo", "colspan": 2}, None],
             [{"type": "bar"}, {"type": "bar"}]
         ],
         subplot_titles=(
-            (f"Peak Demand Seasonality, {latest_yr}<br>"
-             "<sup>Source: EIA 861</sup>"),
-            (f"States with Highest Growth in Winter Peak Demand, {base_year}-{latest_yr}<br>"
-             "<sup>Source: EIA 861</sup>"),
-            (f"States with Highest Growth in Summer Peak Demand, {base_year}-{latest_yr}<br>"
-             "<sup>Source: EIA 861</sup>")
+            f"Peak Demand Seasonality, {latest_yr}<br>"
+            "<sup>Source: EIA 861</sup>",
+            f"Highest Winter Peak Growth States, {base_year}-{latest_yr}<br>"
+            "<sup>Source: EIA</sup>",
+            f"Highest Summer Peak Growth States, {base_year}-{latest_yr}<br>"
+            "<sup>Source: EIA</sup>"
         )
     )
 
-    # --- ROW 1: THE MAP ---
     sizeref = 2. * st['Max_MW'].max() / (60 ** 2)
     lats = st['State'].map(lambda x: state_centroids[x][0])
     lons = st['State'].map(lambda x: state_centroids[x][1])
 
-    # Build multi-line text string
     hover_text = (
         st['State'] + "<br>Max Peak: " +
         st['Max_MW'].apply(lambda x: f"{x:,.0f} MW") +
@@ -1536,49 +1443,60 @@ def plot_peak_data(output_dir):
         lon=lons, lat=lats,
         marker=dict(
             size=st['Max_MW'], sizemode='area', sizeref=sizeref,
-            color=st['Ratio'], colorscale='RdYlBu_r',
-            cmin=0.8, cmid=1.0, cmax=1.2,
-            showscale=True,
+            color=st['Ratio'], colorscale='RdYlBu_r', cmin=0.8, cmid=1.0,
+            cmax=1.2, showscale=True,
             colorbar=dict(
-                title="Summer/Winter<br>Peak Ratio", thickness=15,
-                len=0.4, y=0.8, x=0.95
+                title="Summer/Winter<br>Peak Ratio", thickness=15, len=0.4,
+                y=0.8, x=0.95
             )
         ),
-        text=hover_text,
-        hoverinfo='text', showlegend=False
+        text=hover_text, hoverinfo='text', showlegend=False
     ), row=1, col=1)
 
-    # --- ROW 2, LEFT: WINTER GROWTH ---
     st_winter = st.sort_values('Winter_Growth', ascending=False).head(15)
     fig.add_trace(go.Bar(
         x=st_winter['State'], y=st_winter['Winter_Growth'],
         marker_color='#1f77b4', name='Winter Growth',
-        hovertemplate="State: %{x}<br>Winter Growth: %{y:+.1f}%<extra></extra>"
+        hovertemplate=(
+            "State: %{x}<br>Winter Growth: %{y:+.1f}%<extra></extra>"
+        )
     ), row=2, col=1)
 
-    # --- ROW 2, RIGHT: SUMMER GROWTH ---
     st_summer = st.sort_values('Summer_Growth', ascending=False).head(15)
     fig.add_trace(go.Bar(
         x=st_summer['State'], y=st_summer['Summer_Growth'],
         marker_color='#ff7f0e', name='Summer Growth',
-        hovertemplate="State: %{x}<br>Summer Growth: %{y:+.1f}%<extra></extra>"
+        hovertemplate=(
+            "State: %{x}<br>Summer Growth: %{y:+.1f}%<extra></extra>"
+        )
     ), row=2, col=2)
 
-    # 4. Final Polish
     fig.update_layout(
+        dragmode="pan",
         height=1000, margin={"r": 30, "t": 80, "l": 30, "b": 50},
         showlegend=False,
         geo=dict(
-            scope='usa', projection_type='albers usa',
-            showland=True, landcolor='rgb(245, 245, 245)'
+            scope='usa', projection_type='albers usa', showland=True,
+            landcolor='rgb(220, 220, 220)'
         )
     )
+
+    fig.update_xaxes(domain=[0.05, 0.45], row=2, col=1)
+    fig.update_xaxes(domain=[0.55, 0.95], row=2, col=2)
+
+    annotations = list(fig.layout.annotations)
+    annotations[1].x = 0.25
+    annotations[2].x = 0.75
+    fig.update_layout(annotations=annotations)
 
     fig.update_yaxes(title_text="5-Year Growth (%)", row=2, col=1)
     fig.update_yaxes(title_text="5-Year Growth (%)", row=2, col=2)
 
     html_path = f"{output_dir}/peak_demand.html"
-    fig.write_html(html_path)
+    fig.write_html(
+        html_path, default_width='100%', default_height='100%',
+        config={'scrollZoom': True}
+    )
     print(f" -> Success! Peak demand plots saved to {html_path}")
 
 
@@ -1586,7 +1504,8 @@ def generate_eia_mapping_df(year):
     """Fetches EIA-861 master Utility-to-State mapping."""
     base_urls = [
         f"https://www.eia.gov/electricity/data/eia861/zip/f861{year}.zip",
-        f"https://www.eia.gov/electricity/data/eia861/archive/zip/f861{year}.zip"
+        ("https://www.eia.gov/electricity/data/eia861/archive/zip/"
+         f"f861{year}.zip")
     ]
     headers = {'User-Agent': 'Mozilla/5.0'}
     valid_content = None
@@ -1700,10 +1619,12 @@ def fetch_historical_om_ca(eia_df):
         ly = df_f['report_year'].max()
         df_ly = df_f[df_f['report_year'] == ly]
         top_s = df_ly.pivot_table(
-            index='State', columns='pillar', values='dollar_value', aggfunc='sum'
+            index='State', columns='pillar', values='dollar_value',
+            aggfunc='sum'
         ).fillna(0).reset_index()
-        top_s['Total'] = top_s[['Generation', 'Transmission', 'Distribution']]\
-            .sum(axis=1)
+        top_s['Total'] = top_s[
+            ['Generation', 'Transmission', 'Distribution']
+        ].sum(axis=1)
         top_s = top_s.sort_values('Total', ascending=False).head(15)
 
         df_ca = df_f[(df_f['State'] == 'CA') & (df_f['report_year'] >= 2015)]
@@ -1731,16 +1652,20 @@ def plot_utility_costs(year, output_dir):
         return
 
     pillars = ['Generation', 'Transmission', 'Distribution']
-    colors = {'Generation': '#1f77b4', 'Transmission': '#ff7f0e', 'Distribution': '#2ca02c'}
+    colors = {
+        'Generation': '#1f77b4',
+        'Transmission': '#ff7f0e',
+        'Distribution': '#2ca02c'
+    }
 
     fig = make_subplots(
-        rows=2, cols=1, vertical_spacing=0.12,
-        horizontal_spacing=0.05,  # <-- This pulls the maps right next to each other
+        rows=2, cols=1, vertical_spacing=0.12, horizontal_spacing=0.05,
         subplot_titles=(
-            (f"States with Highest Utility O&M Costs, {ly}<br>"
-             "<sup>Source: FERC Form 1 via PUDL</sup>"),
-            ("CA 10-Year Utility O&M Cost Trend<br>"
-             "<sup>Source: FERC Form 1 via PUDL</sup>"))
+            f"States with Highest Utility O&M Costs, {ly}<br>"
+            "<sup>Source: FERC Form 1</sup>",
+            "CA 10-Year Utility O&M Cost Trend<br>"
+            "<sup>Source: FERC Form 1 via PUDL</sup>"
+        )
     )
 
     for cat in pillars:
@@ -1755,7 +1680,7 @@ def plot_utility_costs(year, output_dir):
 
     fig.update_layout(height=1000, barmode='stack', template="plotly_white")
     html_path = f"{output_dir}/utility_costs.html"
-    fig.write_html(html_path)
+    fig.write_html(html_path, default_width='100%', default_height='100%')
     print(f" -> Success! Utility cost plots saved to {html_path}")
 
 
@@ -1763,7 +1688,8 @@ def fetch_dsm_detailed(year):
     """Fetches Total MW and Sector-level MW (Res, Com, Ind, Trans)."""
     base_urls = [
         f"https://www.eia.gov/electricity/data/eia861/zip/f861{year}.zip",
-        f"https://www.eia.gov/electricity/data/eia861/archive/zip/f861{year}.zip"
+        ("https://www.eia.gov/electricity/data/eia861/archive/zip/"
+         f"f861{year}.zip")
     ]
     headers = {'User-Agent': 'Mozilla/5.0'}
 
@@ -1798,7 +1724,6 @@ def fetch_dsm_detailed(year):
                 data = df_raw.iloc[3:].copy()
 
                 if suffix == 'EE':
-                    # EE Indices: Res=10, Com=11, Ind=12, Trans=13, Total=14
                     return pd.DataFrame({
                         'Utility ID': data.iloc[:, 1],
                         'Utility': data.iloc[:, 2],
@@ -1815,7 +1740,6 @@ def fetch_dsm_detailed(year):
                             data.iloc[:, 14], errors='coerce').fillna(0)
                     })
                 else:
-                    # DR Pot Indices: 15,16,17,18,19 | Actual=24
                     return pd.DataFrame({
                         'Utility ID': data.iloc[:, 1],
                         'Utility': data.iloc[:, 2],
@@ -1845,10 +1769,9 @@ def get_dsm_snapshot(year):
     if df_ee is None or df_dr is None:
         return None
 
-    # Merge, keeping names from both sheets
     df_combined = pd.merge(
-        df_ee, df_dr, on=['Utility ID', 'State'],
-        how='outer', suffixes=('', '_dr')
+        df_ee, df_dr, on=['Utility ID', 'State'], how='outer',
+        suffixes=('', '_dr')
     )
     df_combined['Utility'] = df_combined['Utility'].fillna(
         df_combined['Utility_dr']
@@ -1857,7 +1780,6 @@ def get_dsm_snapshot(year):
     df_combined = df_combined.drop(columns=['Utility_dr'])
     df_combined = df_combined.infer_objects().fillna(0)
 
-    # Add year suffix to all numeric columns
     rename_dict = {
         c: f"{c}_{year}" for c in df_combined.columns
         if c not in ['Utility ID', 'Utility', 'State']
@@ -1875,7 +1797,6 @@ def plot_dsm_comprehensive_dashboard(latest_yr, output_dir):
     if df_old is None or df_new is None:
         return
 
-    # 1. Merge Years
     cols_to_keep = ['Utility ID', 'State'] + [
         c for c in df_old.columns if str(base_year) in c
     ]
@@ -1883,14 +1804,12 @@ def plot_dsm_comprehensive_dashboard(latest_yr, output_dir):
         df_new, df_old[cols_to_keep], on=['Utility ID', 'State'], how='left'
     ).infer_objects().fillna(0)
 
-    # Calculate State-level Aggregates (Totals + Sectors)
     agg_dict = {
         c: 'sum' for c in df_growth.columns
         if str(latest_yr) in c or str(base_year) in c
     }
     state_stats = df_growth.groupby('State').agg(agg_dict).reset_index()
 
-    # 2. Calculate Growth Metrics (ABSOLUTE MW + Percentages for Hovers)
     for sect in ['Res', 'Com', 'Ind', 'Trans']:
         state_stats[f'EE_Gr_{sect}'] = (
             state_stats[f'EE_{sect}_{latest_yr}'] -
@@ -1901,31 +1820,30 @@ def plot_dsm_comprehensive_dashboard(latest_yr, output_dir):
             state_stats[f'DR_Pot_{sect}_{base_year}']
         )
 
-    # Absolute Total Growth
     state_stats['EE_State_Growth'] = (
-        state_stats[f'EE_Total_{latest_yr}'] - state_stats[f'EE_Total_{base_year}']
+        state_stats[f'EE_Total_{latest_yr}'] -
+        state_stats[f'EE_Total_{base_year}']
     )
     state_stats['DR_State_Growth'] = (
         state_stats[f'DR_Pot_Total_{latest_yr}'] -
         state_stats[f'DR_Pot_Total_{base_year}']
     )
 
-    # Percentage Math (Just for the Map Hovers)
     def calc_pct(new, old):
         if old > 0:
             return int(round(((new - old) / old) * 100))
         return 100 if new > 0 else 0
 
     state_stats['EE_State_Pct'] = state_stats.apply(
-        lambda r: calc_pct(r[f'EE_Total_{latest_yr}'], r[f'EE_Total_{base_year}']),
-        axis=1
+        lambda r: calc_pct(
+            r[f'EE_Total_{latest_yr}'], r[f'EE_Total_{base_year}']
+        ), axis=1
     ).apply(lambda x: f"{x:+d}")
 
     state_stats['DR_State_Pct'] = state_stats.apply(
         lambda r: calc_pct(
             r[f'DR_Pot_Total_{latest_yr}'], r[f'DR_Pot_Total_{base_year}']
-        ),
-        axis=1
+        ), axis=1
     ).apply(lambda x: f"{x:+d}")
 
     state_stats['DR_Util_Pct'] = (
@@ -1933,7 +1851,6 @@ def plot_dsm_comprehensive_dashboard(latest_yr, output_dir):
         state_stats[f'DR_Pot_Total_{latest_yr}'] * 100
     ).fillna(0).round(0).astype(int)
 
-    # Top Utility Logic for Hovers
     def get_top_util_pct(state, val_col, old_col):
         sub = df_growth[df_growth['State'] == state]
         if sub.empty:
@@ -1960,7 +1877,6 @@ def plot_dsm_comprehensive_dashboard(latest_yr, output_dir):
         dr_meta.tolist(), index=state_stats.index
     )
 
-    # 3. Prepare Top 15 Data for Bar Charts
     top15_ee = state_stats.sort_values(
         'EE_State_Growth', ascending=False
     ).head(15)
@@ -1968,42 +1884,53 @@ def plot_dsm_comprehensive_dashboard(latest_yr, output_dir):
         'DR_State_Growth', ascending=False
     ).head(15)
 
-    # 4. Build 2x2 Subplots
     fig = make_subplots(
         rows=2, cols=2,
         row_heights=[0.6, 0.4], vertical_spacing=0.1,
-        horizontal_spacing=0.05,  # <-- This pulls the maps right next to each other
+        horizontal_spacing=0.20,
         specs=[
             [{"type": "geo"}, {"type": "geo"}],
             [{"type": "xy"}, {"type": "xy"}]
         ],
         subplot_titles=(
-            (f"Energy Efficiency Avoided Peak, {latest_yr}<br>"
-             "<sup>Source: EIA 861</sup>"),
-            (f"Demand Response Avoided Peak (Potential and Actual), {latest_yr}<br>"
-             "<sup>Source: EIA 861</sup>"),
-            (f"States with Highest EE Growth, by Sector ({base_year}-{latest_yr})<br>"
-             "<sup>Source: EIA 861</sup>"),
-            (f"States with Highest DR Potential Growth, by Sector ({base_year}-{latest_yr})<br>"
-             "<sup>Source: EIA 861</sup>")
+            f"EE Avoided Peak, {latest_yr}<br><sup>Source: EIA 861</sup>",
+            f"DR Avoided Peak, {latest_yr}<br><sup>Source: EIA 861</sup>",
+            f"Highest EE Growth States by Sector ({base_year}-{latest_yr})",
+            f"Highest DR Growth States by Sector ({base_year}-{latest_yr})"
         )
     )
 
-    b_size = 1.5
+    fig.update_xaxes(domain=[0.05, 0.45], row=2, col=1)
+    fig.update_xaxes(domain=[0.55, 0.95], row=2, col=2)
 
-    # --- ROW 1: MAPS ---
+    annotations = list(fig.layout.annotations)
+    annotations[0].yshift = -15
+    annotations[0].x = 0.245
+    annotations[1].yshift = -15
+    annotations[1].x = 0.755
+    annotations[2].yshift = 15
+    annotations[2].x = 0.25
+    annotations[3].yshift = 15
+    annotations[3].x = 0.75
+    fig.layout.annotations = annotations
+
+    b_size = 1.5
     hover_ee = (
-        "<b>%{location}</b><br>State Total: %{marker.size:.1f} MW<br>"
-        "5yr Growth: %{customdata[0]}%<br><br>Top Utility: %{customdata[1]}<br>"
+        "<b>%{location}</b><br>"
+        "State Total: %{marker.size:.1f} MW<br>"
+        "5yr Growth: %{customdata[0]}%<br><br>"
+        "Top Utility: %{customdata[1]}<br>"
         "Utility Potential: %{customdata[2]:.1f} MW<br>"
         "Utility Growth: %{customdata[3]}%<extra></extra>"
     )
 
     fig.add_trace(go.Scattergeo(
         locations=state_stats['State'], locationmode='USA-states',
-        marker=dict(size=state_stats[f'EE_Total_{latest_yr}'], sizemode='area',
-                    sizeref=b_size, color='rgba(31, 119, 180, 0.7)',
-                    line=dict(width=1, color='white')),
+        marker=dict(
+            size=state_stats[f'EE_Total_{latest_yr}'], sizemode='area',
+            sizeref=b_size, color='rgba(31, 119, 180, 0.7)',
+            line=dict(width=1, color='white')
+        ),
         customdata=state_stats[
             ['EE_State_Pct', 'Top_EE_Name', 'Top_EE_Val', 'Top_EE_Str']
         ],
@@ -2011,18 +1938,21 @@ def plot_dsm_comprehensive_dashboard(latest_yr, output_dir):
     ), row=1, col=1)
 
     hover_dr = (
-        "<b>%{location} (Potential)</b><br>State Potential: "
-        "%{marker.size:.1f} MW<br>5yr Growth: %{customdata[0]}%<br><br>"
-        "Top Utility: %{customdata[1]}<br>Utility Potential: "
-        "%{customdata[2]:.1f} MW<br>Utility Growth: %{customdata[3]}%"
-        "<extra></extra>"
+        "<b>%{location} (Potential)</b><br>"
+        "State Potential: %{marker.size:.1f} MW<br>"
+        "5yr Growth: %{customdata[0]}%<br><br>"
+        "Top Utility: %{customdata[1]}<br>"
+        "Utility Potential: %{customdata[2]:.1f} MW<br>"
+        "Utility Growth: %{customdata[3]}%<extra></extra>"
     )
 
     fig.add_trace(go.Scattergeo(
         locations=state_stats['State'], locationmode='USA-states',
-        marker=dict(size=state_stats[f'DR_Pot_Total_{latest_yr}'],
-                    sizemode='area', sizeref=b_size,
-                    color='rgba(144, 238, 144, 0.4)', line=dict(width=0)),
+        marker=dict(
+            size=state_stats[f'DR_Pot_Total_{latest_yr}'], sizemode='area',
+            sizeref=b_size, color='rgba(144, 238, 144, 0.4)',
+            line=dict(width=0)
+        ),
         customdata=state_stats[
             ['DR_State_Pct', 'Top_DR_Name', 'Top_DR_Val', 'Top_DR_Str']
         ],
@@ -2031,20 +1961,19 @@ def plot_dsm_comprehensive_dashboard(latest_yr, output_dir):
 
     fig.add_trace(go.Scattergeo(
         locations=state_stats['State'], locationmode='USA-states',
-        marker=dict(size=state_stats[f'DR_Act_Total_{latest_yr}'],
-                    sizemode='area', sizeref=b_size,
-                    color='rgba(44, 160, 44, 0.9)',
-                    line=dict(width=1, color='white')),
+        marker=dict(
+            size=state_stats[f'DR_Act_Total_{latest_yr}'], sizemode='area',
+            sizeref=b_size, color='rgba(44, 160, 44, 0.9)',
+            line=dict(width=1, color='white')
+        ),
         customdata=state_stats[['DR_Util_Pct']],
         hovertemplate=(
             "<b>%{location} (Actual)</b><br>"
             "Actual MW Called: %{marker.size:.1f} MW<br>"
             "Utilization: %{customdata[0]}%<extra></extra>"
-        ),
-        showlegend=False
+        ), showlegend=False
     ), row=1, col=2)
 
-    # --- ROW 2: ABSOLUTE MW STACKED BARS ---
     colors = {
         'Res': '#1f77b4', 'Com': '#ff7f0e',
         'Ind': '#2ca02c', 'Trans': '#d62728'
@@ -2074,29 +2003,30 @@ def plot_dsm_comprehensive_dashboard(latest_yr, output_dir):
             )
         ), row=2, col=2)
 
-    # 5. Global Layout Settings
     geo_config = dict(
         scope='usa', projection_type='albers usa', showland=True,
         landcolor='rgb(240, 240, 240)', subunitcolor='white'
     )
 
     fig.update_layout(
+        dragmode="pan",
         showlegend=True,
         geo=dict(**geo_config, domain={'x': [0, 0.49]}),
         geo2=dict(**geo_config, domain={'x': [0.51, 1]}),
         barmode='relative',
         legend=dict(
-            orientation="h", yanchor="top", y=-0.08,
-            xanchor="center", x=0.5
+            orientation="h", yanchor="top", y=-0.08, xanchor="center", x=0.5
         ),
-        margin={"r": 10, "t": 50, "l": 10, "b": 70},
-        height=850
+        margin={"r": 0, "t": 35, "l": 0, "b": 70}, height=850
     )
 
     fig.update_yaxes(title_text="5-Year Growth (MW)", row=2, col=1)
     fig.update_yaxes(title_text="5-Year Growth (MW)", row=2, col=2)
     html_path = f"{output_dir}/dsm_potential.html"
-    fig.write_html(html_path)
+    fig.write_html(
+        html_path, default_width='100%', default_height='100%',
+        config={'scrollZoom': True}
+    )
     print(f"-> Success! DSM potential plots saved to {html_path}")
 
 
@@ -2104,7 +2034,6 @@ def plot_building_jobs_trend(bls_key, output_dir):
     """Buildings-related jobs trend."""
     print("Plotting: Buildings jobs (BLS)...")
 
-    # Define the CEU (Unadjusted) Series IDs for all sub-sectors
     series_map = {
         'CEU2023822001': 'HVAC & Plumbing Contractors',
         'CEU2023821001': 'Electrical Contractors',
@@ -2122,7 +2051,6 @@ def plot_building_jobs_trend(bls_key, output_dir):
         'CEU3133590001': 'Other Elec. Equip. Mfg.'
     }
 
-    # Assign legend groups for cleaner Plotly toggling
     group_map = {
         'HVAC & Plumbing Contractors': 'Equipment Installation',
         'Electrical Contractors': 'Equipment Installation',
@@ -2140,7 +2068,6 @@ def plot_building_jobs_trend(bls_key, output_dir):
         'Other Elec. Equip. Mfg.': 'Equipment Manufacturing'
     }
 
-    # Hardcode distinct colors to avoid repeating defaults
     colors = [
         '#1f77b4', '#ff7f0e', '#2ca02c', '#d62728',
         '#9467bd', '#8c564b', '#e377c2', '#7f7f7f',
@@ -2148,7 +2075,6 @@ def plot_building_jobs_trend(bls_key, output_dir):
         '#6b6ecf', '#9c9ede'
     ]
 
-    # Exactly 14 valid series mapped to colors
     keys_list = list(group_map.keys())
     color_dict = {keys_list[i]: colors[i] for i in range(14)}
 
@@ -2157,14 +2083,12 @@ def plot_building_jobs_trend(bls_key, output_dir):
     start_year = 2005
 
     records = []
-    # --- THE FIX: Chunk requests into 10-year blocks to avoid BLS limits ---
     for chunk_start in range(start_year, current_year + 1, 10):
         chunk_end = min(chunk_start + 9, current_year)
         print(f" -> Fetching BLS data: {chunk_start} to {chunk_end}...")
         data = json.dumps({
             "seriesid": list(series_map.keys()),
-            "startyear": str(chunk_start),
-            "endyear": str(chunk_end),
+            "startyear": str(chunk_start), "endyear": str(chunk_end),
             "registrationkey": bls_key
         })
 
@@ -2175,7 +2099,7 @@ def plot_building_jobs_trend(bls_key, output_dir):
             json_data = req.json()
         except Exception as e:
             print(f"\n[WARNING] BLS API fetch failed ({chunk_start}): {e}")
-            continue  # Move to the next chunk instead of killing the script
+            continue
 
         if json_data.get('status') != 'REQUEST_SUCCEEDED':
             err = json_data.get('message')
@@ -2188,7 +2112,6 @@ def plot_building_jobs_trend(bls_key, output_dir):
 
             for item in series['data']:
                 period = item['period']
-
                 if period == 'M13':
                     continue
 
@@ -2198,8 +2121,7 @@ def plot_building_jobs_trend(bls_key, output_dir):
                 date_str = f"{year}-{month}-01"
 
                 records.append({
-                    'Date': date_str,
-                    'Job Category': series_name,
+                    'Date': date_str, 'Job Category': series_name,
                     'Legend Group': group_map.get(series_name, 'Other'),
                     'Employees (Thousands)': value
                 })
@@ -2212,38 +2134,28 @@ def plot_building_jobs_trend(bls_key, output_dir):
     df['Date'] = pd.to_datetime(df['Date'])
     df = df.sort_values(['Job Category', 'Date'])
 
-    # Apply 12-month rolling avg to de-seasonalize unadjusted data
     df['Smoothed Jobs'] = df.groupby('Job Category')[
         'Employees (Thousands)'
     ].transform(lambda x: x.rolling(12, min_periods=1).mean())
-
-    # Filter to 2006+ so the rolling average has time to "warm up"
     df = df[df['Date'] >= '2006-01-01'].copy()
 
-    # Build the Plotly line chart
     fig = go.Figure()
     fig.update_layout(hovermode="x unified")
     fig.update_xaxes(hoverformat="%b %Y")
 
-    # Loop through groups first so they appear organized in the legend/tooltip
     for grp in df['Legend Group'].unique():
         df_group = df[df['Legend Group'] == grp]
 
         for category in df_group['Job Category'].unique():
             df_cat = df_group[df_group['Job Category'] == category]
             fig.add_trace(go.Scatter(
-                x=df_cat['Date'],
-                y=df_cat['Smoothed Jobs'],
-                mode='lines',
-                name=category,
+                x=df_cat['Date'], y=df_cat['Smoothed Jobs'],
+                mode='lines', name=category,
                 line=dict(width=2, color=color_dict.get(category)),
-                legendgroup=grp,
-                legendgrouptitle_text=f"<b>{grp}</b>",
-                # --- THE FIX: Clean, minimalist unified tooltip ---
+                legendgroup=grp, legendgrouptitle_text=f"<b>{grp}</b>",
                 hovertemplate="%{y:,.1f}k<extra></extra>"
             ))
 
-    # Dynamically extract max year and month
     max_date = df['Date'].max()
     max_year = max_date.year
     max_month_name = max_date.strftime('%B')
@@ -2254,17 +2166,14 @@ def plot_building_jobs_trend(bls_key, output_dir):
             f"<sup>Source: BLS; Data through {max_month_name} {max_year}; "
             "12-Month Trailing Average</sup>"
         ),
-        xaxis_title="Year",
-        yaxis_title="Total Employees (Thousands)",
+        xaxis_title="Year", yaxis_title="Total Employees (Thousands)",
         template="plotly_white",
         legend=dict(
-            orientation="v",
-            yanchor="top", y=1.0,
-            xanchor="left", x=1.02,
+            orientation="v", yanchor="top", y=1.0, xanchor="left", x=1.02,
             groupclick="toggleitem"
         ),
         margin=dict(r=250, t=80, l=20, b=40),
-        height=850
+        height=650
     )
 
     if not os.path.exists(output_dir):
@@ -2283,17 +2192,11 @@ def plot_gdp_by_building_type(bea_key, output_dir):
         print("\n[WARNING] BEA API key is missing. Skipping GDP plot.")
         return
 
-    # BEA API Parameters for GDP by Industry (Value Added)
     url = "https://apps.bea.gov/api/data/"
     params = {
-        "UserID": bea_key,
-        "method": "GetData",
-        "datasetname": "GdpByIndustry",
-        "TableID": "1",        # Table 1: Value Added by Industry
-        "Frequency": "A",      # Annual
-        "Year": "ALL",
-        "Industry": "ALL",
-        "ResultFormat": "JSON"
+        "UserID": bea_key, "method": "GetData", "datasetname": "GdpByIndustry",
+        "TableID": "1", "Frequency": "A", "Year": "ALL",
+        "Industry": "ALL", "ResultFormat": "JSON"
     }
 
     try:
@@ -2304,22 +2207,19 @@ def plot_gdp_by_building_type(bea_key, output_dir):
         print(f"\n[WARNING] BEA API fetch failed: {e}")
         return
 
-    # Robust JSON Parsing for BEA API Quirks
     results_node = data.get('BEAAPI', {}).get('Results', {})
-
-    # Check if the API returned an explicit error message
     if isinstance(results_node, dict) and 'Error' in results_node:
-        err_msg = results_node['Error'].get('ErrorDetail', results_node['Error'])
+        err_msg = results_node['Error'].get(
+            'ErrorDetail', results_node['Error']
+        )
         print(f"\n[WARNING] BEA API Error: {err_msg}")
         return
 
     try:
-        # GdpByIndustry sometimes wraps Results in a list
         if isinstance(results_node, list):
             results = results_node[0]['Data']
         else:
             results = results_node['Data']
-
         df = pd.DataFrame(results)
     except (KeyError, IndexError, TypeError) as e:
         print(f"\n[WARNING] Unexpected BEA API response structure: {e}")
@@ -2329,131 +2229,103 @@ def plot_gdp_by_building_type(bea_key, output_dir):
         print("\n[WARNING] No data returned from BEA API.")
         return
 
-    # 1. Convert data types
     df['DataValue'] = pd.to_numeric(df['DataValue'], errors='coerce')
     df['Year'] = pd.to_numeric(df['Year'], errors='coerce')
 
-    # 2. Dynamically determine the maximum available year in the data
     max_gdp_year = int(df['Year'].max())
     min_gdp_year = max_gdp_year - 20
 
-    print(f" -> Found GDP data through {max_gdp_year}. Plotting {min_gdp_year}-{max_gdp_year}.")
-
-    # 3. Filter for the 20-year trailing window
+    print(
+        f" -> Found GDP data through {max_gdp_year}. "
+        f"Plotting {min_gdp_year}-{max_gdp_year}."
+    )
     df = df[(df['Year'] >= min_gdp_year) & (df['Year'] <= max_gdp_year)]
 
-    # Map mutually exclusive NAICS equivalents to our 3 building types
     mapping = {
-        # --- RESIDENTIAL ---
         '53': 'Residential (Real Estate & Housing)',
-        # --- COMMERCIAL (Service Economy) ---
-        '44RT': 'Commercial (Offices, Retail, Services)',  # Retail Tradef
-        '51': 'Commercial (Offices, Retail, Services)',    # Information
-        '52': 'Commercial (Offices, Retail, Services)',    # Finance & Insurance
-        '54': 'Commercial (Offices, Retail, Services)',    # Professional
-        '55': 'Commercial (Offices, Retail, Services)',    # Management
-        '56': 'Commercial (Offices, Retail, Services)',    # Admin/Waste
-        '61': 'Commercial (Offices, Retail, Services)',    # Education
-        '62': 'Commercial (Offices, Retail, Services)',    # Healthcare
-        '71': 'Commercial (Offices, Retail, Services)',    # Arts/Entertainment
-        '72': 'Commercial (Offices, Retail, Services)',    # Accommodation/Food
-        '81': 'Commercial (Offices, Retail, Services)',    # Other Services
-        'G': 'Commercial (Offices, Retail, Services)',     # Government
-        # --- INDUSTRIAL / Other ---
-        '11': 'Industrial / Other',                      # Agriculture
-        '21': 'Industrial / Other',                      # Mining
-        '22': 'Industrial / Other',                      # Utilities
-        '23': 'Industrial / Other',                      # Construction
-        '31G': 'Industrial / Other',                     # Manufacturing
-        '42': 'Industrial / Other',                      # Wholesale Trade
-        '48TW': 'Industrial / Other'                     # Transport/Warehouse
+        '44RT': 'Commercial (Offices, Retail, Services)',
+        '51': 'Commercial (Offices, Retail, Services)',
+        '52': 'Commercial (Offices, Retail, Services)',
+        '54': 'Commercial (Offices, Retail, Services)',
+        '55': 'Commercial (Offices, Retail, Services)',
+        '56': 'Commercial (Offices, Retail, Services)',
+        '61': 'Commercial (Offices, Retail, Services)',
+        '62': 'Commercial (Offices, Retail, Services)',
+        '71': 'Commercial (Offices, Retail, Services)',
+        '72': 'Commercial (Offices, Retail, Services)',
+        '81': 'Commercial (Offices, Retail, Services)',
+        'G': 'Commercial (Offices, Retail, Services)',
+        '11': 'Industrial / Other', '21': 'Industrial / Other',
+        '22': 'Industrial / Other', '23': 'Industrial / Other',
+        '31G': 'Industrial / Other', '42': 'Industrial / Other',
+        '48TW': 'Industrial / Other'
     }
 
     df_filtered = df[df['Industry'].isin(mapping.keys())].copy()
     df_filtered['Category'] = df_filtered['Industry'].map(mapping)
 
-    # Aggregate by Year and Category
-    df_agg = df_filtered.groupby(['Year', 'Category'])['DataValue'].sum()
-    df_agg = df_agg.reset_index()
-
-    # Calculate Total GDP per year for percentage hovers
+    df_agg = df_filtered.groupby(
+        ['Year', 'Category']
+    )['DataValue'].sum().reset_index()
     total_gdp = df_agg.groupby('Year')['DataValue'].sum().reset_index()
     total_gdp.rename(columns={'DataValue': 'Total_GDP'}, inplace=True)
     df_agg = pd.merge(df_agg, total_gdp, on='Year')
     df_agg['Share'] = (df_agg['DataValue'] / df_agg['Total_GDP']) * 100
 
-    # Sort categories to stack beautifully (Industrial bottom, then Res, then Com)
     cat_order = [
         'Industrial / Other',
         'Residential (Real Estate & Housing)',
         'Commercial (Offices, Retail, Services)'
     ]
 
-    # Build the Plotly Wedge Plot (Stacked Area Chart)
     fig = go.Figure()
     colors = {
-        'Commercial (Offices, Retail, Services)': '#1f77b4',  # Blue
-        'Residential (Real Estate & Housing)': '#ff7f0e',     # Orange
-        'Industrial / Other': '#7f7f7f'                     # Gray
+        'Commercial (Offices, Retail, Services)': '#1f77b4',
+        'Residential (Real Estate & Housing)': '#ff7f0e',
+        'Industrial / Other': '#7f7f7f'
     }
 
     for cat in cat_order:
         df_plot = df_agg[df_agg['Category'] == cat].sort_values('Year')
         fig.add_trace(go.Scatter(
-            x=df_plot['Year'],
-            y=df_plot['DataValue'],
-            name=cat,
-            mode='lines',
-            line=dict(width=0.5, color=colors[cat]),
-            stackgroup='one',  # This creates the stacked wedge effect
-            fillcolor=colors[cat],
+            x=df_plot['Year'], y=df_plot['DataValue'], name=cat, mode='lines',
+            line=dict(width=0.5, color=colors[cat]), stackgroup='one',
+            fillcolor=colors[cat], customdata=df_plot[['Share']],
             hovertemplate=(
                 f"<b>{cat}</b><br>"
                 "Year: %{x}<br>"
-                "Value Added: $%{y:,.0f} Billion<br>"
+                "Value Added: $%{{y:,.0f}} Billion<br>"
                 "Share of GDP: %{customdata[0]:.1f}%<extra></extra>"
-            ),
-            customdata=df_plot[['Share']]
+            )
         ))
 
     fig.update_layout(
         title=(
-            "GDP Contributions of Activities in Residential and Commercial Buildings, "
-            f"{min_gdp_year}-{max_gdp_year}<br>"
-            "<sup>Source: BEA</sup>"
+            "GDP Contributions of Activities in Buildings, "
+            f"{min_gdp_year}-{max_gdp_year}<br><sup>Source: BEA</sup>"
         ),
-        xaxis_title="Year",
-        yaxis_title="GDP Contribution ($ Billions)",
-        template="plotly_white",
-        hovermode="x unified",
+        xaxis_title="Year", yaxis_title="GDP Contribution ($ Billions)",
+        template="plotly_white", hovermode="x unified",
         legend=dict(
-            orientation="h",
-            yanchor="top",
-            y=-0.15,
-            xanchor="center",
-            x=0.5
+            orientation="h", yanchor="top", y=-0.15, xanchor="center", x=0.5
         ),
-        margin=dict(r=40, t=80, l=40, b=80),
-        height=700
+        margin=dict(r=40, t=80, l=40, b=80), height=700
     )
 
-    # Force x-axis to show integer years nicely
     fig.update_xaxes(dtick=2)
-
     html_path = f"{output_dir}/gdp_contributions.html"
     fig.write_html(html_path, default_width='100%', default_height='100%')
     print(f" -> Success! GDP wedge HTML saved to {html_path}")
 
 
 def plot_ferc_load_growth_forecasts(output_dir):
-    """Maps FERC 714 load growth, explicitly separating RTOs from Retail Utilities."""
+    """Maps FERC 714 load growth, separating RTOs from Retail Utilities."""
     print("Plotting: FERC load growth forecasts...")
 
-    # ==========================================
-    # 1. LOAD GEOJSON FOR CENTROIDS
-    # ==========================================
-    geojson_url = \
-        'https://raw.githubusercontent.com/plotly/datasets/master/geojson-counties-fips.json'
+    geojson_url = (
+        'https://raw.githubusercontent.com/plotly/datasets/master/'
+        'geojson-counties-fips.json'
+    )
     try:
         req = Request(geojson_url, headers={'User-Agent': 'Mozilla/5.0'})
         with urlopen(req) as response:
@@ -2464,110 +2336,148 @@ def plot_ferc_load_growth_forecasts(output_dir):
         df_all_counties['state_fips'] = df_all_counties['FIPS'].str[:2]
 
         county_gdf = gpd.read_file(geojson_url)
-        county_gdf['lon'] = county_gdf.to_crs(epsg=3857).centroid.to_crs(epsg=4326).x
-        county_gdf['lat'] = county_gdf.to_crs(epsg=3857).centroid.to_crs(epsg=4326).y
-        county_coords = county_gdf[['id', 'lon', 'lat']].rename(columns={'id': 'FIPS'})
+        county_gdf['lon'] = county_gdf.to_crs(
+            epsg=3857).centroid.to_crs(epsg=4326).x
+        county_gdf['lat'] = county_gdf.to_crs(
+            epsg=3857).centroid.to_crs(epsg=4326).y
+        county_coords = county_gdf[['id', 'lon', 'lat']].rename(
+            columns={'id': 'FIPS'}
+        )
     except Exception as e:
         print(f"\n[ERROR] Failed to download county GeoJSON: {e}")
         return
 
-    # ==========================================
-    # 2. FETCH PUDL DATA
-    # ==========================================
     base_url = "https://s3.us-west-2.amazonaws.com/pudl.catalyst.coop/eel-hole"
     try:
         print(" -> Fetching PUDL Datasets...")
-        df_crosswalk = pd.read_parquet(f"{base_url}/core_ferc714__respondent_id.parquet")
+        df_crosswalk = pd.read_parquet(
+            f"{base_url}/core_ferc714__respondent_id.parquet"
+        )
         df_ferc_all = pd.read_parquet(
-            f"{base_url}/core_ferc714__yearly_planning_area_demand_forecast.parquet")
-
-        df_terr_all = pd.read_parquet(f"{base_url}/core_eia861__yearly_service_territory.parquet")
-        terr_date_col = 'report_year' if 'report_year' in df_terr_all.columns else 'report_date'
-        df_terr = df_terr_all[df_terr_all[terr_date_col] == df_terr_all[terr_date_col].max()].copy()
+            f"{base_url}/core_ferc714__yearly_planning_area_demand_"
+            "forecast.parquet"
+        )
+        df_terr_all = pd.read_parquet(
+            f"{base_url}/core_eia861__yearly_service_territory.parquet"
+        )
+        terr_date_col = (
+            'report_year' if 'report_year' in df_terr_all.columns
+            else 'report_date'
+        )
+        df_terr = df_terr_all[
+            df_terr_all[terr_date_col] == df_terr_all[terr_date_col].max()
+        ].copy()
     except Exception as e:
         print(f"\n[ERROR] PUDL fetch failed: {e}")
         return
 
-    # ==========================================
-    # 3. METRICS (NEAREST NEIGHBOR GROUPING FIX)
-    # ==========================================
-    date_col = 'report_year' if 'report_year' in df_ferc_all.columns else 'report_date'
+    date_col = (
+        'report_year' if 'report_year' in df_ferc_all.columns
+        else 'report_date'
+    )
     df_ferc_all['report_year_clean'] = (
         pd.to_datetime(df_ferc_all[date_col]).dt.year if
-        date_col == 'report_date' else df_ferc_all[date_col])
+        date_col == 'report_date' else df_ferc_all[date_col]
+    )
 
     latest_yr = df_ferc_all['report_year_clean'].max()
-    df_latest = df_ferc_all[df_ferc_all['report_year_clean'] == latest_yr].copy()
-    df_latest['years_out'] = df_latest['forecast_year'] - df_latest['report_year_clean']
+    df_latest = df_ferc_all[
+        df_ferc_all['report_year_clean'] == latest_yr
+    ].copy()
+    df_latest['years_out'] = (
+        df_latest['forecast_year'] - df_latest['report_year_clean']
+    )
 
-    # Max of Summer vs Winter Peak
     df_latest['peak_mw'] = df_latest[
-        ['summer_peak_demand_forecast_mw', 'winter_peak_demand_forecast_mw']].max(axis=1)
+        ['summer_peak_demand_forecast_mw', 'winter_peak_demand_forecast_mw']
+    ].max(axis=1)
 
-    # Clean missing peaks before math
     df_latest = df_latest.dropna(subset=['peak_mw'])
 
-    # 3A. Get Baseline (The earliest year reported by each utility)
     df_latest = df_latest.sort_values(['respondent_id_ferc714', 'years_out'])
-    df_baseline = df_latest.groupby('respondent_id_ferc714').first().reset_index()
-    df_baseline = df_baseline[
-        ['respondent_id_ferc714', 'peak_mw']].rename(columns={'peak_mw': 'baseline_mw'})
+    df_baseline = df_latest.groupby(
+        'respondent_id_ferc714'
+    ).first().reset_index()
+    df_baseline = df_baseline[['respondent_id_ferc714', 'peak_mw']].rename(
+        columns={'peak_mw': 'baseline_mw'}
+    )
 
-    # 3B. Get 5-Year Peak (Find the year closest to 5 for each utility)
     df_latest['dist_5'] = (df_latest['years_out'] - 5).abs()
     df_5yr = df_latest.sort_values(
-        ['respondent_id_ferc714', 'dist_5']).groupby('respondent_id_ferc714').first().reset_index()
-    df_5yr = df_5yr[['respondent_id_ferc714', 'peak_mw']].rename(columns={'peak_mw': 'peak_5yr'})
+        ['respondent_id_ferc714', 'dist_5']
+    ).groupby('respondent_id_ferc714').first().reset_index()
+    df_5yr = df_5yr[['respondent_id_ferc714', 'peak_mw']].rename(
+        columns={'peak_mw': 'peak_5yr'}
+    )
 
-    # 3C. Get 10-Year Peak (Find the year closest to 10 for each utility)
     df_latest['dist_10'] = (df_latest['years_out'] - 10).abs()
     df_10yr = df_latest.sort_values(
-        ['respondent_id_ferc714', 'dist_10']).groupby('respondent_id_ferc714').first().reset_index()
-    df_10yr = df_10yr[['respondent_id_ferc714', 'peak_mw']].rename(columns={'peak_mw': 'peak_10yr'})
+        ['respondent_id_ferc714', 'dist_10']
+    ).groupby('respondent_id_ferc714').first().reset_index()
+    df_10yr = df_10yr[['respondent_id_ferc714', 'peak_mw']].rename(
+        columns={'peak_mw': 'peak_10yr'}
+    )
 
-    # Merge them safely
-    df_growth = df_baseline.merge(df_5yr, on='respondent_id_ferc714', how='left')
-    df_growth = df_growth.merge(df_10yr, on='respondent_id_ferc714', how='left')
+    df_growth = df_baseline.merge(
+        df_5yr, on='respondent_id_ferc714', how='left'
+    )
+    df_growth = df_growth.merge(
+        df_10yr, on='respondent_id_ferc714', how='left'
+    )
 
-    # Calculate Deltas & Percentages safely
-    df_growth['delta_5yr'] = (df_growth['peak_5yr'] - df_growth['baseline_mw']).fillna(0)
+    df_growth['delta_5yr'] = (
+        df_growth['peak_5yr'] - df_growth['baseline_mw']
+    ).fillna(0)
     df_growth['pct_5yr'] = np.where(
-        df_growth['baseline_mw'] > 0, (df_growth['delta_5yr'] / df_growth['baseline_mw']) * 100, 0)
+        df_growth['baseline_mw'] > 0,
+        (df_growth['delta_5yr'] / df_growth['baseline_mw']) * 100, 0
+    )
 
-    df_growth['delta_10yr'] = (df_growth['peak_10yr'] - df_growth['baseline_mw']).fillna(0)
+    df_growth['delta_10yr'] = (
+        df_growth['peak_10yr'] - df_growth['baseline_mw']
+    ).fillna(0)
     df_growth['pct_10yr'] = np.where(
-        df_growth['baseline_mw'] > 0, (df_growth['delta_10yr'] / df_growth['baseline_mw']) * 100, 0)
+        df_growth['baseline_mw'] > 0,
+        (df_growth['delta_10yr'] / df_growth['baseline_mw']) * 100, 0
+    )
 
-    # Establish minimum visual bubble sizes
     df_growth['bubble_5yr'] = df_growth['delta_5yr'].fillna(0).clip(lower=10)
     df_growth['bubble_10yr'] = df_growth['delta_10yr'].fillna(0).clip(lower=10)
 
-    # ==========================================
-    # 4. SPATIAL ANCHORING & CATEGORIZATION
-    # ==========================================
     df_terr['FIPS'] = df_terr['state_id_fips'].astype(str).str.zfill(2) + \
         df_terr['county_id_fips'].astype(str).str.zfill(3).str[-3:]
 
-    eia_col = 'eia_code' if 'eia_code' in df_crosswalk.columns else 'utility_id_eia'
+    eia_col = (
+        'eia_code' if 'eia_code' in df_crosswalk.columns
+        else 'utility_id_eia'
+    )
     df_cw_exp = df_crosswalk.dropna(subset=[eia_col]).copy()
-    df_cw_exp[eia_col] = df_cw_exp[eia_col].astype(str).str.replace(r'\[|\]', '', regex=True)
-    df_cw_exp = df_cw_exp.assign(**{eia_col: df_cw_exp[eia_col].str.split(',')}).explode(eia_col)
+    df_cw_exp[eia_col] = df_cw_exp[eia_col].astype(str).str.replace(
+        r'\[|\]', '', regex=True
+    )
+    df_cw_exp = df_cw_exp.assign(
+        **{eia_col: df_cw_exp[eia_col].str.split(',')}
+    ).explode(eia_col)
 
     df_cw_exp['join_id'] = pd.to_numeric(
-        df_cw_exp[eia_col], errors='coerce').fillna(-1).astype(int)
+        df_cw_exp[eia_col], errors='coerce'
+    ).fillna(-1).astype(int)
     df_terr['join_id'] = pd.to_numeric(
-        df_terr['utility_id_eia'], errors='coerce').fillna(-2).astype(int)
+        df_terr['utility_id_eia'], errors='coerce'
+    ).fillna(-2).astype(int)
 
     df_retail = pd.merge(
         df_cw_exp[['respondent_id_ferc714', 'join_id']],
-        df_terr[['join_id', 'FIPS']], on='join_id')[['respondent_id_ferc714', 'FIPS']]
+        df_terr[['join_id', 'FIPS']], on='join_id'
+    )[['respondent_id_ferc714', 'FIPS']]
 
     rto_states = {
-        'PJM': ['42', '34', '24', '10', '39', '51', '54', '11', '17', '18', '26', '21', '37', '47'],
+        'PJM': ['42', '34', '24', '10', '39', '51', '54', '11', '17', '18',
+                '26', '21', '37', '47'],
         'Midcontinent|MISO': ['27', '55', '19', '17', '18', '26', '29', '05',
                               '22', '28', '38', '46', '30', '48'],
-        'Southwest Power|SPP': [
-            '20', '40', '31', '38', '46', '48', '35', '29', '05', '22', '30', '56'],
+        'Southwest Power|SPP': ['20', '40', '31', '38', '46', '48', '35', '29',
+                                '05', '22', '30', '56'],
         'California Independent|CAISO': ['06'],
         'New York Independent|NYISO': ['36'],
         'ISO New England|ISONE': ['09', '23', '25', '33', '44', '50'],
@@ -2577,34 +2487,44 @@ def plot_ferc_load_growth_forecasts(output_dir):
     rto_rows = []
     rto_ids = []
     for name_key, state_list in rto_states.items():
-        match = df_crosswalk[df_crosswalk['respondent_name_ferc714'].str.contains(
-            name_key, case=False, regex=True, na=False)]
+        match = df_crosswalk[
+            df_crosswalk['respondent_name_ferc714'].str.contains(
+                name_key, case=False, regex=True, na=False
+            )
+        ]
         if not match.empty:
             for rto_id in match['respondent_id_ferc714'].unique():
                 rto_ids.append(rto_id)
-                for fips in df_all_counties[
-                        df_all_counties['state_fips'].isin(state_list)]['FIPS'].tolist():
-                    rto_rows.append({'respondent_id_ferc714': rto_id, 'FIPS': fips})
+                fips_list = df_all_counties[
+                    df_all_counties['state_fips'].isin(state_list)
+                ]['FIPS'].tolist()
+                for fips in fips_list:
+                    rto_rows.append({
+                        'respondent_id_ferc714': rto_id, 'FIPS': fips
+                    })
 
     df_master = pd.concat([df_retail, pd.DataFrame(rto_rows)]).drop_duplicates()
 
     df_spatial_coords = pd.merge(df_master, county_coords, on='FIPS')
     ba_centroids = df_spatial_coords.groupby(
-        'respondent_id_ferc714')[['lon', 'lat']].mean().reset_index()
+        'respondent_id_ferc714'
+    )[['lon', 'lat']].mean().reset_index()
 
     df_map = pd.merge(df_growth, ba_centroids, on='respondent_id_ferc714')
-    df_map = pd.merge(df_map, df_crosswalk[[
-        'respondent_id_ferc714', 'respondent_name_ferc714']], on='respondent_id_ferc714')
+    df_map = pd.merge(
+        df_map,
+        df_crosswalk[['respondent_id_ferc714', 'respondent_name_ferc714']],
+        on='respondent_id_ferc714'
+    )
 
-    df_map['Entity_Type'] = np.where(df_map['respondent_id_ferc714'].isin(rto_ids),
-                                     'Wholesale RTO/ISO', 'Retail/Vertically Integrated')
+    df_map['Entity_Type'] = np.where(
+        df_map['respondent_id_ferc714'].isin(rto_ids),
+        'Wholesale RTO/ISO', 'Retail/Vertically Integrated'
+    )
 
     df_map = df_map.dropna(subset=['lon', 'lat', 'bubble_5yr', 'bubble_10yr'])
     df_map = df_map[df_map['baseline_mw'] > 0].copy()
 
-    # ==========================================
-    # 5. BUILD THE DASHBOARD
-    # ==========================================
     max_delta = max(df_map['bubble_10yr'].max(), df_map['bubble_5yr'].max())
     sizeref = 2.0 * max_delta / (45 ** 2) if max_delta > 0 else 1
 
@@ -2612,104 +2532,100 @@ def plot_ferc_load_growth_forecasts(output_dir):
         rows=1, cols=2,
         specs=[[{'type': 'scattergeo'}, {'type': 'scattergeo'}]],
         subplot_titles=(
-            (f"5-Year Projection, {latest_yr}<br>"
-             "<sup>Source: FERC Form 714 via PUDL</sup>"),
-            (f"10-Year Projection, {latest_yr}<br>"
-             "<sup>Source: FERC Form 714 via PUDL</sup>")),
-        horizontal_spacing=0  # <-- This pulls the maps right next to each other
+            f"5-Year Projection, {latest_yr}<br>"
+            "<sup>Source: FERC Form 714 via PUDL</sup>",
+            f"10-Year Projection, {latest_yr}<br>"
+            "<sup>Source: FERC Form 714 via PUDL</sup>"
+        ),
+        horizontal_spacing=0
     )
+
+    annotations = list(fig.layout.annotations)
+    for a in annotations:
+        a.yshift = -45
+    fig.layout.annotations = annotations
 
     cmax_val = df_map['pct_10yr'].quantile(0.95)
 
     for ent_type in ['Retail/Vertically Integrated', 'Wholesale RTO/ISO']:
         df_sub = df_map[df_map['Entity_Type'] == ent_type]
-
-        # UX Fix: Use Shape instead of Border Thickness
-        # Give everything a thin black border for visibility
-        marker_symbol = 'diamond' if ent_type == 'Wholesale RTO/ISO' else 'circle'
+        marker_symbol = (
+            'diamond' if ent_type == 'Wholesale RTO/ISO' else 'circle'
+        )
         marker_line_width = 0.5
         marker_line_color = 'black'
 
         for col_num, (size_col, delta_col, pct_col) in enumerate([
             ('bubble_5yr', 'delta_5yr', 'pct_5yr'),
-                ('bubble_10yr', 'delta_10yr', 'pct_10yr')], 1):
-            show_colorbar = (col_num == 2 and ent_type == 'Retail/Vertically Integrated')
+            ('bubble_10yr', 'delta_10yr', 'pct_10yr')
+        ], 1):
+            show_colorbar = (
+                col_num == 2 and ent_type == 'Retail/Vertically Integrated'
+            )
 
             fig.add_trace(
                 go.Scattergeo(
                     lon=df_sub['lon'], lat=df_sub['lat'],
                     text=df_sub['respondent_name_ferc714'],
                     marker=dict(
-                        symbol=marker_symbol,
-                        size=df_sub[size_col],
-                        sizemode='area',
-                        sizeref=sizeref,
-                        sizemin=4,
-                        color=df_sub[pct_col],
-                        colorscale='YlOrRd',
-                        cmin=0,
-                        cmax=cmax_val,
-                        showscale=show_colorbar,
-                        colorbar=dict(title="Growth (%)", x=1.02) if show_colorbar else None,
+                        symbol=marker_symbol, size=df_sub[size_col],
+                        sizemode='area', sizeref=sizeref, sizemin=4,
+                        color=df_sub[pct_col], colorscale='YlOrRd', cmin=0,
+                        cmax=cmax_val, showscale=show_colorbar,
+                        colorbar=dict(
+                            title="Growth (%)", x=1.02, len=0.6, y=0.5
+                        ) if show_colorbar else None,
                         line_color=marker_line_color,
-                        line_width=marker_line_width,
-                        opacity=0.85
+                        line_width=marker_line_width, opacity=0.85
                     ),
                     customdata=df_sub[[
                         'respondent_name_ferc714', 'Entity_Type',
-                        'baseline_mw', delta_col, pct_col]],
+                        'baseline_mw', delta_col, pct_col
+                    ]],
                     hovertemplate=(
-                        "<b>%{customdata[0]}</b> (%{customdata[1]})<br>" +
-                        "Current Baseline: %{customdata[2]:,.0f} MW<br>" +
-                        "Projected Growth: <b>+%{customdata[3]:,.0f} MW</b><br>" +
+                        "<b>%{customdata[0]}</b> (%{customdata[1]})<br>"
+                        "Current Baseline: %{customdata[2]:,.0f} MW<br>"
+                        "Projected Growth: <b>+%{customdata[3]:,.0f} MW</b><br>"
                         "Growth Rate: <b>%{customdata[4]:.1f}%</b><extra></extra>"
                     ),
-                    name=ent_type,
-                    legendgroup=ent_type,
+                    name=ent_type, legendgroup=ent_type,
                     showlegend=(col_num == 1)
-                ),
-                row=1, col=col_num
+                ), row=1, col=col_num
             )
 
     fig.update_layout(
-        title_x=0.5,
-        geo=dict(scope='usa', projection_type='albers usa',
-                 showland=True, landcolor="rgb(235, 240, 240)"),
-        geo2=dict(scope='usa', projection_type='albers usa',
-                  showland=True, landcolor="rgb(235, 240, 240)"),
-        height=700,
-        margin={"r": 0, "t": 80, "l": 0, "b": 80},
+        dragmode="pan",
+        title_x=0.5, height=700,
+        geo=dict(
+            scope='usa', projection_type='albers usa', showland=True,
+            landcolor="rgb(235, 240, 240)"
+        ),
+        geo2=dict(
+            scope='usa', projection_type='albers usa', showland=True,
+            landcolor="rgb(235, 240, 240)"
+        ),
+        margin={"r": 0, "t": 40, "l": 0, "b": 40},
         legend=dict(
-            orientation="h",
-            yanchor="top",
-            y=-0.05,
-            xanchor="center",
-            x=0.5,
+            orientation="h", yanchor="top", y=0.04, xanchor="center", x=0.5,
             itemsizing="constant"
         )
     )
 
     html_path = f"{output_dir}/load_forecasts.html"
-    fig.write_html(html_path, default_width='100%', default_height='100%')
-    print(f" -> Success! Load forecast HTML maps {len(df_map)} total Planning Areas.")
-
-    # return df_map
+    fig.write_html(
+        html_path, default_width='100%', default_height='100%',
+        config={'scrollZoom': True}
+    )
+    print(f" -> Success! Load forecasts HTML ({len(df_map)} Planning Areas).")
 
 
 def plot_insurance_costs(output_dir):
-    """
-    Fetches 2023 ACS 5-Year estimates and calculates the interpolated median
-    home insurance cost, mapping it to official, up-to-date Census boundaries.
-    """
+    """Fetches 2023 ACS 5-Year estimates and calculates median costs."""
     print("Plotting: Homeowner insurance costs (ACS 2023)...")
 
-    # ==========================================
-    # 1. DYNAMICALLY FIND LATEST ACS YEAR & DATA
-    # ==========================================
     target_year = pd.Timestamp.now().year
     success_acs = False
 
-    # We loop backward to find the latest year the Census API actually supports
     while target_year >= 2021:
         bucket_suffixes = [
             ('003', '016'), ('004', '017'), ('005', '018'), ('006', '019'),
@@ -2743,11 +2659,6 @@ def plot_insurance_costs(output_dir):
         print("\n[ERROR] Could not find any valid ACS data years.")
         return
 
-    # ==========================================
-    # 2. LOAD CORRESPONDING CENSUS BOUNDARIES
-    # ==========================================
-    # Boundary files usually lag or match the ACS data year.
-    # We try the data year first, then fall back to the prior year.
     boundary_year = target_year
     counties = None
     while boundary_year >= 2022:
@@ -2768,11 +2679,10 @@ def plot_insurance_costs(output_dir):
         print("\n[ERROR] Failed to download valid Census boundaries.")
         return
 
-    # ==========================================
-    # 3. INTERPOLATED MEDIAN CALCULATION
-    # ==========================================
     val_cols = [col for col in df_acs.columns if col.startswith('B25141')]
-    df_acs[val_cols] = df_acs[val_cols].apply(pd.to_numeric, errors='coerce').fillna(0)
+    df_acs[val_cols] = df_acs[val_cols].apply(
+        pd.to_numeric, errors='coerce'
+    ).fillna(0)
 
     for i, (m, nm) in enumerate(bucket_suffixes, 1):
         df_acs[f'bucket_{i}'] = df_acs[f'B25141_{m}E'] + df_acs[f'B25141_{nm}E']
@@ -2813,25 +2723,17 @@ def plot_insurance_costs(output_dir):
 
     df_map = df_acs[df_acs['B25141_001E'] > 0].copy()
 
-    # ==========================================
-    # 4. BUILD THE CHOROPLETH DASHBOARD
-    # ==========================================
     print(" -> Building HTML Choropleth Map...")
     fig = px.choropleth(
         df_map,
-        geojson=counties,
-        locations='FIPS',
-        featureidkey="properties.GEOID",  # Maps to the 'GEOID' property in the Census shapefile
-        color='interpolated_median',
-        color_continuous_scale="Plasma",  # High-contrast multi-hue scale
+        geojson=counties, locations='FIPS', featureidkey="properties.GEOID",
+        color='interpolated_median', color_continuous_scale="Plasma",
         range_color=(df_map['interpolated_median'].quantile(0.05),
                      df_map['interpolated_median'].quantile(0.95)),
-        scope="usa",
-        hover_name='NAME',
+        scope="usa", hover_name='NAME',
         hover_data={
-            'FIPS': False,
-            'interpolated_median': ':$,.0f',
-            'B25141_001E': ':,',
+            'FIPS': False, 'interpolated_median': ':$,.0f',
+            'B25141_001E': ':,'
         },
         labels={
             'interpolated_median': 'Median Cost ($)',
@@ -2840,25 +2742,27 @@ def plot_insurance_costs(output_dir):
     )
 
     fig.update_layout(
+        dragmode="pan",
         title_text=(
             f"Homeowners Insurance Costs, {target_year}<br>"
-            "<sup>Source: Census ACS; Median, includes fire, hazard, and flood</sup>"
+            "<sup>Source: Census ACS; Median, includes fire, hazard, "
+            "and flood</sup>"
         ),
         title_x=0.5,
-        margin={"r": 0, "t": 80, "l": 0, "b": 0},
-        height=700
+        margin={"r": 0, "t": 60, "l": 0, "b": 0}, height=700,
+        coloraxis_colorbar=dict(len=0.6, y=0.5)
     )
 
     html_path = f"{output_dir}/insurance_costs.html"
-    fig.write_html(html_path, default_width='100%', default_height='100%')
+    fig.write_html(
+        html_path, default_width='100%', default_height='100%',
+        config={'scrollZoom': True}
+    )
     print(f" -> Success! Insurance costs HTML saved to {html_path}")
 
 
 def plot_price_expend_benchmarks(output_dir):
-    """
-    Fetches historical and modern EIA data, handles reporting lags,
-    adjusts for inflation, and plots 2000-benchmarked trends.
-    """
+    """Fetches historical and modern EIA data and plots 2000-benchmarks."""
     print("Plotting: Trends in energy prices and expenditures...")
 
     def fetch_excel(url, sheet_name=0, header=None, skiprows=0):
@@ -2873,38 +2777,41 @@ def plot_price_expend_benchmarks(output_dir):
         )
 
     try:
-        # ==========================================
-        # 1A. FETCH HISTORICAL ELECTRICITY (Up to 2020)
-        # ==========================================
         print(" -> Fetching Historical Electricity (1990-2020)...")
         base_elec = "https://www.eia.gov/electricity/data/state"
 
-        df_rev = fetch_excel(f"{base_elec}/revenue_annual.xlsx", header=0, skiprows=1)
-        df_sales = fetch_excel(f"{base_elec}/sales_annual.xlsx", header=0, skiprows=1)
-        df_cust = fetch_excel(f"{base_elec}/customers_annual.xlsx", header=0, skiprows=1)
+        df_rev = fetch_excel(
+            f"{base_elec}/revenue_annual.xlsx", header=0, skiprows=1
+        )
+        df_sales = fetch_excel(
+            f"{base_elec}/sales_annual.xlsx", header=0, skiprows=1
+        )
+        df_cust = fetch_excel(
+            f"{base_elec}/customers_annual.xlsx", header=0, skiprows=1
+        )
 
         def clean_elec_hist(df):
             cols = [str(c).lower() for c in df.columns]
-            yr_col = df.columns[next(i for i, c in enumerate(cols) if "year" in c)]
-            st_col = df.columns[next(i for i, c in enumerate(cols) if "state" in c)]
+            yr_col = df.columns[next(i for i, c in enumerate(cols)
+                                     if "year" in c)]
+            st_col = df.columns[next(i for i, c in enumerate(cols)
+                                     if "state" in c)]
             sec_col = df.columns[
-                next(i for i, c in enumerate(cols) if "sector" in c or "industry" in c)]
-            res_col = df.columns[next(i for i, c in enumerate(cols) if "residential" in c)]
-            com_col = df.columns[next(i for i, c in enumerate(cols) if "commercial" in c)]
+                next(i for i, c in enumerate(cols)
+                     if "sector" in c or "industry" in c)
+            ]
+            res_col = df.columns[next(i for i, c in enumerate(cols)
+                                      if "residential" in c)]
+            com_col = df.columns[next(i for i, c in enumerate(cols)
+                                      if "commercial" in c)]
 
-            df = df.rename(
-                columns={
-                    yr_col: "Year",
-                    st_col: "State",
-                    sec_col: "Sector",
-                    res_col: "Residential",
-                    com_col: "Commercial",
-                }
-            )
+            df = df.rename(columns={
+                yr_col: "Year", st_col: "State", sec_col: "Sector",
+                res_col: "Residential", com_col: "Commercial",
+            })
 
-            # Strip all spaces and punctuation to catch EIA typos (e.g., 2009)
-            sector_clean = (
-                df["Sector"].astype(str).str.lower().str.replace(r"[^a-z]", "", regex=True)
+            sector_clean = df["Sector"].astype(str).str.lower().str.replace(
+                r"[^a-z]", "", regex=True
             )
             df = df[sector_clean.str.contains("totalelectricindustry")]
             df = df[df["State"] != "US"]
@@ -2912,7 +2819,9 @@ def plot_price_expend_benchmarks(output_dir):
             for col in ["Residential", "Commercial"]:
                 df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
 
-            return df.groupby("Year")[["Residential", "Commercial"]].sum().reset_index()
+            return df.groupby(
+                "Year"
+            )[["Residential", "Commercial"]].sum().reset_index()
 
         df_elec_old = clean_elec_hist(df_rev).merge(
             clean_elec_hist(df_sales), on="Year", suffixes=("_rev", "_sales")
@@ -2921,14 +2830,10 @@ def plot_price_expend_benchmarks(output_dir):
         df_elec_old.rename(
             columns={
                 "Residential": "Residential_cust",
-                "Commercial": "Commercial_cust",
-            },
-            inplace=True,
+                "Commercial": "Commercial_cust"
+            }, inplace=True
         )
 
-        # ==========================================
-        # 1B. FETCH MODERN ELECTRICITY (2021-Present)
-        # ==========================================
         print(" -> Fetching Modern EIA-861M Electricity (2021-Present)...")
         recent_dfs = []
         base_861 = "https://www.eia.gov/electricity/data/eia861m"
@@ -2943,9 +2848,9 @@ def plot_price_expend_benchmarks(output_dir):
             for url in urls_to_try:
                 try:
                     df = fetch_excel(url, header=0, skiprows=2)
-                    break  # Success, exit the url checking loop
+                    break
                 except Exception:
-                    continue  # Try the next url
+                    continue
 
             if df is not None:
                 try:
@@ -2956,20 +2861,24 @@ def plot_price_expend_benchmarks(output_dir):
                     ]
 
                     df_agg = df_agg.dropna(subset=["State"])
-                    df_agg = df_agg[~df_agg["State"].astype(str).str.contains("US", case=False)]
+                    df_agg = df_agg[
+                        ~df_agg["State"].astype(str).str.contains(
+                            "US", case=False
+                        )
+                    ]
 
                     agg_cols = [
-                        "Res_Rev", "Res_Sales", "Res_Cust",
-                        "Com_Rev", "Com_Sales", "Com_Cust"
+                        "Res_Rev", "Res_Sales", "Res_Cust", "Com_Rev",
+                        "Com_Sales", "Com_Cust"
                     ]
                     for col in agg_cols:
-                        df_agg[col] = pd.to_numeric(df_agg[col], errors="coerce").fillna(0)
+                        df_agg[col] = pd.to_numeric(
+                            df_agg[col], errors="coerce"
+                        ).fillna(0)
 
-                    df_month = (
-                        df_agg.groupby("Month")[agg_cols].sum().reset_index()
-                    )
+                    df_month = df_agg.groupby("Month")[agg_cols].sum().\
+                        reset_index()
 
-                    # Ensure we have all 12 months before appending
                     if len(df_month) == 12:
                         annual = {
                             "Year": year,
@@ -2982,20 +2891,17 @@ def plot_price_expend_benchmarks(output_dir):
                         }
                         if annual["Residential_sales"] > 0:
                             recent_dfs.append(pd.DataFrame([annual]))
-                    else:
-                        print(f"    [Diagnostic] Skipped {year}: {len(df_month)} months.")
                 except Exception as e:
-                    print(f"    [Diagnostic] Could not parse {year} format: {e}")
+                    print(f"    [Diagnostic] Could not parse {year}: {e}")
 
         if recent_dfs:
             df_elec_new = pd.concat(recent_dfs, ignore_index=True)
-            df_elec_raw = pd.concat([df_elec_old, df_elec_new], ignore_index=True)
+            df_elec_raw = pd.concat(
+                [df_elec_old, df_elec_new], ignore_index=True
+            )
         else:
             df_elec_raw = df_elec_old
 
-        # ==========================================
-        # 2. FETCH NATURAL GAS DATA
-        # ==========================================
         print(" -> Fetching EIA Natural Gas files...")
         base_ng = "https://www.eia.gov/dnav/ng/xls"
         ng_urls = {
@@ -3011,7 +2917,6 @@ def plot_price_expend_benchmarks(output_dir):
             header_idx = None
             date_col_name = None
 
-            # Scan every cell in the top 15 rows to robustly locate the date/year column
             for idx, row in df.head(15).iterrows():
                 for cell in row:
                     val = str(cell).strip().lower()
@@ -3023,48 +2928,41 @@ def plot_price_expend_benchmarks(output_dir):
                     break
 
             if header_idx is None:
-                raise ValueError(f"Missing header row in {name}. Head:\n{df.head()}")
+                raise ValueError(f"Missing header row in {name}")
 
             df.columns = df.iloc[header_idx]
             df = df.iloc[header_idx + 1:].reset_index(drop=True)
 
             us_col = next(
-                (
-                    col
-                    for col in df.columns
-                    if isinstance(col, str)
-                    and ("U.S." in col or "United States" in col)
-                ),
-                None,
+                (col for col in df.columns if isinstance(col, str)
+                 and ("U.S." in col or "United States" in col)), None
             )
 
             df = df[[date_col_name, us_col]].copy()
-            df.rename(columns={date_col_name: "Date", us_col: name}, inplace=True)
-
+            df.rename(
+                columns={date_col_name: "Date", us_col: name}, inplace=True
+            )
             df["Year"] = pd.to_datetime(df["Date"], errors="coerce").dt.year
             df = df.dropna(subset=["Year"])
             df["Year"] = df["Year"].astype(int)
             df[name] = pd.to_numeric(df[name], errors="coerce")
-
             return df[["Year", name]]
 
         ng_dfs = []
         for key, url in ng_urls.items():
-            # THE FIX: Explicitly target the 'Data 1' sheet!
-            ng_dfs.append(clean_ng(fetch_excel(url, sheet_name='Data 1', header=None), key))
+            ng_dfs.append(clean_ng(
+                fetch_excel(url, sheet_name='Data 1', header=None), key
+            ))
 
         df_ng_raw = ng_dfs[0]
         for d in ng_dfs[1:]:
             df_ng_raw = df_ng_raw.merge(d, on="Year", how="outer")
 
-        # ==========================================
-        # 3. FETCH CPI FOR INFLATION ADJUSTMENT
-        # ==========================================
         print(" -> Fetching FRED CPI data...")
         try:
             fred_headers = {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
-                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9",
+                "User-Agent": "Mozilla/5.0",
+                "Accept": "text/html,application/xhtml+xml,application/xml"
             }
             cpi_url = "https://fred.stlouisfed.org/graph/fredgraph.csv?id=CPIAUCNS"
             cpi_resp = requests.get(cpi_url, headers=fred_headers, timeout=10)
@@ -3078,20 +2976,19 @@ def plot_price_expend_benchmarks(output_dir):
             df_cpi["CPI"] = pd.to_numeric(df_cpi[val_col], errors="coerce")
             cpi_agg = df_cpi.groupby("Year")["CPI"].mean().reset_index()
         except Exception:
-            print("   -> Fallback: Using hardcoded annual CPI index...")
             cpi_dict = {
-                2000: 172.2, 2001: 177.1, 2002: 179.9, 2003: 184.0, 2004: 188.9,
-                2005: 195.3, 2006: 201.6, 2007: 207.3, 2008: 215.3, 2009: 214.5,
-                2010: 218.1, 2011: 224.9, 2012: 229.6, 2013: 233.0, 2014: 236.7,
-                2015: 237.0, 2016: 240.0, 2017: 245.1, 2018: 251.1, 2019: 255.7,
-                2020: 258.8, 2021: 271.0, 2022: 292.6, 2023: 304.7, 2024: 314.0,
-                2025: 320.0, 2026: 325.0,
+                2000: 172.2, 2001: 177.1, 2002: 179.9, 2003: 184.0,
+                2004: 188.9, 2005: 195.3, 2006: 201.6, 2007: 207.3,
+                2008: 215.3, 2009: 214.5, 2010: 218.1, 2011: 224.9,
+                2012: 229.6, 2013: 233.0, 2014: 236.7, 2015: 237.0,
+                2016: 240.0, 2017: 245.1, 2018: 251.1, 2019: 255.7,
+                2020: 258.8, 2021: 271.0, 2022: 292.6, 2023: 304.7,
+                2024: 314.0, 2025: 320.0, 2026: 325.0,
             }
-            cpi_agg = pd.DataFrame(list(cpi_dict.items()), columns=["Year", "CPI"])
+            cpi_agg = pd.DataFrame(
+                list(cpi_dict.items()), columns=["Year", "CPI"]
+            )
 
-        # ==========================================
-        # 4. MASTER MERGE, FFILL & CALCULATE
-        # ==========================================
         df_master = df_elec_raw.merge(df_ng_raw, on="Year", how="outer")
         df_master = df_master.merge(cpi_agg, on="Year", how="outer")
 
@@ -3100,7 +2997,6 @@ def plot_price_expend_benchmarks(output_dir):
             (df_master["Year"] >= 2000) & (df_master["Year"] <= current_year)
         ].sort_values("Year")
 
-        # Forward fill lagging denominators (max 2 years) - Never forward-fill volatile prices!
         lagging_metrics = [
             "Residential_cust", "Commercial_cust", "cust_res", "cust_com"
         ]
@@ -3124,117 +3020,109 @@ def plot_price_expend_benchmarks(output_dir):
         df_master["ng_res_price"] = df_master["pri_res"]
         df_master["ng_com_price"] = df_master["pri_com"]
         df_master["ng_res_exp"] = (
-            (df_master["vol_res"] * 1000 * df_master["pri_res"]) / df_master["cust_res"]
+            (df_master["vol_res"] * 1000 * df_master["pri_res"]) /
+            df_master["cust_res"]
         )
         df_master["ng_com_exp"] = (
-            (df_master["vol_com"] * 1000 * df_master["pri_com"]) / df_master["cust_com"]
+            (df_master["vol_com"] * 1000 * df_master["pri_com"]) /
+            df_master["cust_com"]
         )
 
         target_cols = [
             "elec_res_price", "elec_com_price", "elec_res_exp", "elec_com_exp",
-            "ng_res_price", "ng_com_price", "ng_res_exp", "ng_com_exp",
+            "ng_res_price", "ng_com_price", "ng_res_exp", "ng_com_exp"
         ]
         df_master = df_master.dropna(subset=target_cols)
 
         latest_yr = int(df_master["Year"].max())
-        cpi_latest = df_master.loc[df_master["Year"] == latest_yr, "CPI"].values[0]
+        cpi_latest = df_master.loc[
+            df_master["Year"] == latest_yr, "CPI"
+        ].values[0]
 
         for col in target_cols:
-            df_master[f"{col}_real"] = df_master[col] * (cpi_latest / df_master["CPI"])
+            df_master[f"{col}_real"] = (
+                df_master[col] * (cpi_latest / df_master["CPI"])
+            )
 
         base_year_df = df_master[df_master["Year"] == 2000]
         for col in target_cols:
             base_val = base_year_df[f"{col}_real"].values[0]
             df_master[f"{col}_idx"] = (df_master[f"{col}_real"] / base_val) * 100
 
-        # ==========================================
-        # 5. BUILD DASHBOARD (SHARED Y-AXIS)
-        # ==========================================
         print(f" -> Building HTML Dashboard (Extended to {latest_yr})...")
         fig = make_subplots(
             rows=1, cols=2,
             subplot_titles=(
-                ("Trend in Energy Prices<br>"
-                 f"<sup>Source: EIA; Real {latest_yr} dollars</sup>"),
-                ("Trend in Energy Expenditures per Customer<br>"
-                 f"<sup>Source: EIA; Real {latest_yr} dollars</sup>")
+                f"Trend in Energy Prices<br>"
+                f"<sup>Source: EIA; Real {latest_yr} dollars</sup>",
+                f"Trend in Energy Expenditures per Customer<br>"
+                f"<sup>Source: EIA; Real {latest_yr} dollars</sup>"
             ),
             shared_yaxes=True,
             horizontal_spacing=0.08,
         )
 
         metrics = {
-            "elec_res": {"name": "Electricity - Residential", "c": "#0366d6", "d": "solid"},
-            "elec_com": {"name": "Electricity - Commercial", "c": "#0366d6", "d": "dash"},
-            "ng_res": {"name": "Natural Gas - Residential", "c": "#d73a49", "d": "solid"},
-            "ng_com": {"name": "Natural Gas - Commercial", "c": "#d73a49", "d": "dash"},
+            "elec_res": {"name": "Electricity - Residential",
+                         "c": "#0366d6", "d": "solid"},
+            "elec_com": {"name": "Electricity - Commercial",
+                         "c": "#0366d6", "d": "dash"},
+            "ng_res": {"name": "Natural Gas - Residential",
+                       "c": "#d73a49", "d": "solid"},
+            "ng_com": {"name": "Natural Gas - Commercial",
+                       "c": "#d73a49", "d": "dash"},
         }
 
         for key, style in metrics.items():
-            fig.add_trace(
-                go.Scatter(
-                    x=df_master["Year"],
-                    y=df_master[f"{key}_price_idx"],
-                    name=style["name"],
-                    legendgroup=key,
-                    mode="lines+markers",
-                    line=dict(color=style["c"], dash=style["d"], width=2.5),
-                    marker=dict(size=6),
-                    hovertemplate=(
-                        f"<b>{style['name']}</b><br>"
-                        "Year: %{x}<br>Index: %{y:.1f}<extra></extra>"
-                    ),
+            fig.add_trace(go.Scatter(
+                x=df_master["Year"], y=df_master[f"{key}_price_idx"],
+                name=style["name"], legendgroup=key, mode="lines+markers",
+                line=dict(color=style["c"], dash=style["d"], width=2.5),
+                marker=dict(size=6),
+                hovertemplate=(
+                    f"<b>{style['name']}</b><br>"
+                    "Year: %{x}<br>Index: %{y:.1f}<extra></extra>"
                 ),
-                row=1, col=1,
-            )
+            ), row=1, col=1)
 
-            fig.add_trace(
-                go.Scatter(
-                    x=df_master["Year"],
-                    y=df_master[f"{key}_exp_idx"],
-                    name=style["name"],
-                    legendgroup=key,
-                    showlegend=False,
-                    mode="lines+markers",
-                    line=dict(color=style["c"], dash=style["d"], width=2.5),
-                    marker=dict(size=6),
-                    hovertemplate=(
-                        f"<b>{style['name']}</b><br>"
-                        "Year: %{x}<br>Index: %{y:.1f}<extra></extra>"
-                    ),
+            fig.add_trace(go.Scatter(
+                x=df_master["Year"], y=df_master[f"{key}_exp_idx"],
+                name=style["name"], legendgroup=key, showlegend=False,
+                mode="lines+markers",
+                line=dict(color=style["c"], dash=style["d"], width=2.5),
+                marker=dict(size=6),
+                hovertemplate=(
+                    f"<b>{style['name']}</b><br>"
+                    "Year: %{x}<br>Index: %{y:.1f}<extra></extra>"
                 ),
-                row=1, col=2,
-            )
+            ), row=1, col=2)
 
         fig.add_hline(
-            y=100,
-            line_dash="dot",
-            line_color="black",
-            row="all",
-            col="all",
+            y=100, line_dash="dot", line_color="black", row="all", col="all",
             annotation_text="Year 2000 Baseline",
             annotation_position="bottom right",
         )
 
         fig.update_layout(
-            title_x=0.5,
-            height=600,
-            margin=dict(t=80, b=80, l=40, r=40),
+            title_x=0.5, height=600, margin=dict(t=80, b=80, l=40, r=40),
             legend=dict(
                 orientation="h", yanchor="top", y=-0.15, xanchor="center", x=0.5
             ),
             plot_bgcolor="rgba(0,0,0,0)",
         )
 
-        fig.update_xaxes(showgrid=True, gridcolor="lightgray", title_text="Year")
+        fig.update_xaxes(
+            showgrid=True, gridcolor="lightgray", title_text="Year"
+        )
         fig.update_yaxes(
-            showgrid=True, gridcolor="lightgray", title_text="Index (2000 = 100)", col=1
+            showgrid=True, gridcolor="lightgray",
+            title_text="Index (2000 = 100)", col=1
         )
         fig.update_yaxes(showgrid=True, gridcolor="lightgray", col=2)
 
         html_path = f"{output_dir}/price_expend_trend.html"
         fig.write_html(html_path, default_width="100%", default_height="100%")
-        print(f" -> Success! Price and expenditure trend HTML saved to {html_path}")
+        print(f" -> Success! Price and expenditure HTML saved to {html_path}")
 
         return df_master
 
@@ -3248,15 +3136,10 @@ def plot_exports(census_api_key, output_directory):
     if not os.path.exists(output_directory):
         os.makedirs(output_directory)
 
-    # -------------------------------------------------------------------------
-    # DYNAMIC YEAR CONFIGURATION
-    # -------------------------------------------------------------------------
     current_year = datetime.now().year
-    # Use the previous year to ensure a full 12 months of data is available
     latest_year = str(current_year - 1)
-    # 4-year growth comparison
     base_year = str(int(latest_year) - 4)
-    # 1. Configuration
+
     trade_dictionary = {
         "HVAC": ["841581", "841582", "841861"],
         "Controls & Battery Storage": ["853710", "853720", "850760",
@@ -3284,19 +3167,16 @@ def plot_exports(census_api_key, output_directory):
 
     subtraction_map = {"8541": "854143", "8542": "854231"}
     codes_to_fetch = [c for sub in trade_dictionary.values() for c in sub]
-    trade_endpoint = "https://api.census.gov/data/timeseries/intltrade/exports/hs"
+    trade_endpoint = (
+        "https://api.census.gov/data/timeseries/intltrade/exports/hs"
+    )
 
-    # -------------------------------------------------------------------------
-    # 2. PASS 1: Time-Series Data (Line Chart)
-    # -------------------------------------------------------------------------
     print(" -> Fetching total US exports trend data...")
     all_rows = []
     for hs in codes_to_fetch:
         params = {
-            "get": "ALL_VAL_MO,E_COMMODITY",
-            "E_COMMODITY": hs,
-            "COMM_LVL": f"HS{len(hs)}",
-            "time": "from 2013-01",
+            "get": "ALL_VAL_MO,E_COMMODITY", "E_COMMODITY": hs,
+            "COMM_LVL": f"HS{len(hs)}", "time": "from 2013-01",
             "key": census_api_key
         }
         try:
@@ -3305,8 +3185,7 @@ def plot_exports(census_api_key, output_directory):
                 data = r.json()
                 for row in data[1:]:
                     all_rows.append({
-                        'Val': float(row[0]),
-                        'HS': str(row[1]),
+                        'Val': float(row[0]), 'HS': str(row[1]),
                         'Date': pd.to_datetime(row[4], format='%Y-%m')
                     })
             time.sleep(0.1)
@@ -3318,8 +3197,9 @@ def plot_exports(census_api_key, output_directory):
         return
 
     df_ts = pd.DataFrame(all_rows)
-    df_piv = df_ts.pivot_table(index='Date', columns='HS',
-                               values='Val', aggfunc='sum').fillna(0)
+    df_piv = df_ts.pivot_table(
+        index='Date', columns='HS', values='Val', aggfunc='sum'
+    ).fillna(0)
 
     for total, sub in subtraction_map.items():
         if total in df_piv.columns and sub in df_piv.columns:
@@ -3336,9 +3216,6 @@ def plot_exports(census_api_key, output_directory):
         final_list.append(sub)
     df_plot_ts = pd.concat(final_list)
 
-    # -------------------------------------------------------------------------
-    # 3. PASS 2: Composition Data (Stacked Bars - Percentage Normalized)
-    # -------------------------------------------------------------------------
     print(" -> Fetching country-specific data...")
     comp_rows = []
 
@@ -3353,17 +3230,18 @@ def plot_exports(census_api_key, output_directory):
     for hs, label in comp_codes.items():
         for yr in [base_year, latest_year]:
             params = {
-                "get": "ALL_VAL_MO,CTY_NAME,CTY_CODE",
-                "E_COMMODITY": hs, "CTY_CODE": "*",
-                "COMM_LVL": "HS6", "time": yr, "key": census_api_key
+                "get": "ALL_VAL_MO,CTY_NAME,CTY_CODE", "E_COMMODITY": hs,
+                "CTY_CODE": "*", "COMM_LVL": "HS6", "time": yr,
+                "key": census_api_key
             }
             r = requests.get(trade_endpoint, params=params)
             if r.status_code == 200:
                 data = r.json()
                 headers = data[0]
-                v_idx, n_idx, c_idx = (headers.index("ALL_VAL_MO"),
-                                       headers.index("CTY_NAME"),
-                                       headers.index("CTY_CODE"))
+                v_idx, n_idx, c_idx = (
+                    headers.index("ALL_VAL_MO"), headers.index("CTY_NAME"),
+                    headers.index("CTY_CODE")
+                )
                 sums = {}
                 for row in data[1:]:
                     code_str = str(row[c_idx])
@@ -3373,16 +3251,20 @@ def plot_exports(census_api_key, output_directory):
                     v_f = float(v_raw) if v_raw not in [None, '-', ''] else 0.0
                     sums[row[n_idx]] = sums.get(row[n_idx], 0) + v_f
                 for c_name, total in sums.items():
-                    comp_rows.append({"Label": label, "Year": yr,
-                                      "Value": total, "Country": c_name})
+                    comp_rows.append({
+                        "Label": label, "Year": yr,
+                        "Value": total, "Country": c_name
+                    })
 
     if not comp_rows:
         print("❌ PIPELINE HALTED: No composition data retrieved.")
         return
 
     df_raw = pd.DataFrame(comp_rows)
-    df_pivot = df_raw.pivot_table(index=['Label', 'Country'], columns='Year',
-                                  values='Value', aggfunc='sum').reset_index().fillna(0)
+    df_pivot = df_raw.pivot_table(
+        index=['Label', 'Country'], columns='Year', values='Value',
+        aggfunc='sum'
+    ).reset_index().fillna(0)
     df_pivot.columns = [str(c) for c in df_pivot.columns]
 
     if base_year not in df_pivot.columns:
@@ -3392,19 +3274,14 @@ def plot_exports(census_api_key, output_directory):
 
     df_pivot['Change'] = df_pivot[latest_year] - df_pivot[base_year]
 
-    # -------------------------------------------------------------------------
-    # PERCENTAGE MATH & EXPLICIT LOOPING
-    # -------------------------------------------------------------------------
     final_bar_rows = []
     for label in df_pivot['Label'].unique():
         df_sub = df_pivot[df_pivot['Label'] == label].sort_values(
             latest_year, ascending=False
         )
-        # Calculate totals for the denominator
         total_base = df_sub[base_year].sum()
         total_latest = df_sub[latest_year].sum()
 
-        # Prevent division by zero
         div_base = total_base if total_base > 0 else 1
         div_latest = total_latest if total_latest > 0 else 1
 
@@ -3430,67 +3307,66 @@ def plot_exports(census_api_key, output_directory):
 
     df_bar = pd.DataFrame(final_bar_rows)
 
-    # -------------------------------------------------------------------------
-    # 4. Integrated Plotting
-    # -------------------------------------------------------------------------
     fig = make_subplots(
         rows=2, cols=2, specs=[[{"colspan": 2}, None], [{}, {}]],
-        vertical_spacing=0.12, row_heights=[0.65, 0.35],
-        subplot_titles=((
+        vertical_spacing=0.18, row_heights=[0.68, 0.32],
+        horizontal_spacing=0.20,
+        subplot_titles=(
             "Monthly Value by Export Category<br>"
-            "<sup>Source: Census U.S. Exports of Goods</sup>"), (
+            "<sup>Source: Census U.S. Exports of Goods</sup>",
             f"% of {latest_year} Total<br>"
-            "<sup>Source: Census U.S. Exports of Goods</sup>"), (
+            "<sup>Source: Census U.S. Exports of Goods</sup>",
             f"% Growth, {base_year}-{latest_year}<br>"
-            "<sup>Source: Census U.S. Exports of Goods</sup>"))
+            "<sup>Source: Census U.S. Exports of Goods</sup>"
+        )
     )
 
-    # A. Line Chart Traces (Legend 1)
     line_palette = px.colors.qualitative.Alphabet
     all_hs_list = [c for sub in trade_dictionary.values() for c in sub]
 
     for grp_name, hs_list in trade_dictionary.items():
         for hs in hs_list:
-            d = df_plot_ts[(df_plot_ts['HS'] == hs) &
-                           (df_plot_ts['Date'] >= '2014-01-01')]
+            d = df_plot_ts[
+                (df_plot_ts['HS'] == hs) & (df_plot_ts['Date'] >= '2014-01-01')
+            ]
             if not d.empty:
                 c_idx = all_hs_list.index(hs) % len(line_palette)
                 fig.add_trace(go.Scatter(
-                    x=d['Date'], y=d['Smooth'],
-                    name=product_labels.get(hs, hs),
+                    x=d['Date'], y=d['Smooth'], name=product_labels.get(hs, hs),
                     line=dict(width=2.5, color=line_palette[c_idx]),
                     legendgroup=grp_name,
                     legendgrouptitle_text=f"<b>{grp_name}</b>",
-                    # THE FIX: Removed the bolded name and line break
-                    hovertemplate="$%{y:,.1f}M<extra></extra>",
-                    legend="legend"
+                    hovertemplate="$%{y:,.1f}M<extra></extra>", legend="legend"
                 ), row=1, col=1)
 
-    # B. Bar Chart Traces (Legend 2 - Percentages)
     bar_colors = px.colors.qualitative.Prism
     u_countries = df_bar['Country'].unique()
-    sorted_countries = [c for c in u_countries if c != 'All Other'] + ['All Other']
+    sorted_countries = [
+        c for c in u_countries if c != 'All Other'
+    ] + ['All Other']
 
     for idx, country in enumerate(sorted_countries):
         c_sub = df_bar[df_bar['Country'] == country]
         color = ('rgb(180,180,180)' if country == 'All Other'
                  else bar_colors[idx % len(bar_colors)])
 
-        # Market Share Panel
         fig.add_trace(go.Bar(
             name=country, x=c_sub['Label'], y=c_sub['Share_Latest'],
             marker_color=color, legend="legend2",
-            hovertemplate="<b>" + country + "</b><br>Share: %{y:.1f}%<extra></extra>"
+            hovertemplate=(
+                "<b>" + country + "</b><br>Share: %{y:.1f}%<extra></extra>"
+            )
         ), row=2, col=1)
 
-        # Growth Contribution Panel
         fig.add_trace(go.Bar(
             name=country, x=c_sub['Label'], y=c_sub['Growth_Contrib'],
             marker_color=color, showlegend=False, legend="legend2",
-            hovertemplate="<b>" + country + "</b><br>Added to Growth: %{y:.1f}%<extra></extra>"
+            hovertemplate=(
+                "<b>" + country + "</b><br>Added to Growth: "
+                "%{y:.1f}%<extra></extra>"
+            )
         ), row=2, col=2)
 
-    # 5. Layout & UI
     fig.update_layout(
         template="plotly_white", height=1300, barmode='relative',
         hovermode="x unified",
@@ -3500,21 +3376,18 @@ def plot_exports(census_api_key, output_directory):
         ),
         legend2=dict(
             title="<b>Country</b>", traceorder="normal",
-            yanchor="top", y=0.32, xanchor="left", x=1.02
-        )
+            yanchor="top", y=0.34, xanchor="left", x=1.02
+        ),
+        margin={"r": 20, "t": 50, "l": 20, "b": 50}
     )
 
     fig.update_yaxes(title_text="Value ($M, 12-Mo. Avg.)", row=1, col=1)
     fig.update_yaxes(title_text="% of Total Export Market", row=2, col=1)
     fig.update_yaxes(title_text="% Growth", row=2, col=2)
 
-    # Explicitly set the x-axis category order for the bottom panels
     custom_x_order = [
-        "Air-to-Air Heat Pumps",
-        "Insulating Glass",
-        "Mineral Insulation",
-        "Smart Building Controls",
-        "Li-Ion Storage"
+        "Air-to-Air Heat Pumps", "Insulating Glass", "Mineral Insulation",
+        "Smart Building Controls", "Li-Ion Storage"
     ]
 
     fig.update_xaxes(
@@ -3554,11 +3427,8 @@ def main():
     print("  INITIALIZING PLOTTING PIPELINE")
     print("=====================================================\n")
 
-    # This looks for a .env file and loads it into your local environment.
-    # If it doesn't find one (like when running on GitHub Actions), it just silently skips it!
     load_dotenv()
 
-    # Securely fetch API keys from the environment variables
     bls_key = os.environ.get('BLS_API_KEY')
     eia_key = os.environ.get('EIA_API_KEY')
     bea_key = os.environ.get('BEA_API_KEY')
@@ -3566,7 +3436,9 @@ def main():
     census_key = os.environ.get('CENSUS_API_KEY')
 
     if not all([bls_key, eia_key, bea_key, ita_key, census_key]):
-        print("\n[WARNING] One or more API keys are missing from the environment.")
+        print(
+            "\n[WARNING] One or more API keys are missing from the environment."
+        )
 
     output_dir = "graphics"
     if not os.path.exists(output_dir):

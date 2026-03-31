@@ -4,11 +4,11 @@
 
 <br>
 
+[![Auto-update Status](https://github.com/jtlangevin/us-demand-trends/actions/workflows/update_dashboard.yml/badge.svg)](https://github.com/jtlangevin/us-demand-trends/actions/workflows/update_dashboard.yml)
+
 ### 🤝 Contributions
 * Spot a problem with the results or have a request for an improvement? [Submit an issue](https://github.com/jtlangevin/us-demand-trends/issues).
 * Help develop the underlying code via [GitHub](https://github.com/jtlangevin/us-demand-trends).
-
-<br>
 
 <details style="background-color: #f8f9fa; border: 1px solid #e1e4e8; border-radius: 8px; padding: 20px; margin-bottom: 30px; box-shadow: 0 4px 6px rgba(0,0,0,0.05);">
   <summary style="cursor: pointer; font-weight: bold; font-size: 1.1em; outline: none;">📖 Table of Contents (Click to expand)</summary>

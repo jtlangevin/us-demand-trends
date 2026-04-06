@@ -149,12 +149,12 @@ Buildings-related jobs – jobs to design, construct, operate, and retrofit buil
 <hr style="border: 2px solid #333; margin: 30px 0;">
 
 
-### Exports of Buildings-related Products
+### Trade of Buildings-related Products
 
-Buildings sector and other demand-side products are important players in US export markets. These charts demonstrate the magnitude of export markets for such products, the historical trends for those markets, and which countries the US is exporting the products to.
+Buildings sector and other demand-side products are important players in US trade markets. These charts demonstrate the magnitude of export and import markets for such products, the historical trends for those markets, and net trade balances by product and country.
 
 <div align="center">
-  <iframe src="graphics/exports.html" width="100%" height="1350px" frameborder="0" scrolling="no"></iframe>
+  <iframe src="graphics/exports_imports.html" width="100%" height="1350px" frameborder="0" scrolling="no"></iframe>
 </div>
 
 <hr style="border: 2px solid #333; margin: 30px 0;">

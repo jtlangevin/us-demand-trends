@@ -3321,7 +3321,7 @@ def plot_price_expend_benchmarks(output_dir):
 
 
 def plot_exports(census_api_key, output_directory):
-    print("Plotting: US export trends and trading partners...")
+    print("Plotting: US trade trends...")
     if not os.path.exists(output_directory):
         os.makedirs(output_directory)
 
@@ -3356,58 +3356,88 @@ def plot_exports(census_api_key, output_directory):
 
     subtraction_map = {"8541": "854143", "8542": "854231"}
     codes_to_fetch = [c for sub in trade_dictionary.values() for c in sub]
-    trade_endpoint = (
+
+    exp_endpoint = (
         "https://api.census.gov/data/timeseries/intltrade/exports/hs"
     )
+    imp_endpoint = (
+        "https://api.census.gov/data/timeseries/intltrade/imports/hs"
+    )
 
-    print(" -> Fetching total US exports trend data...")
-    all_rows = []
-    for hs in codes_to_fetch:
-        params = {
-            "get": "ALL_VAL_MO,E_COMMODITY", "E_COMMODITY": hs,
-            "COMM_LVL": f"HS{len(hs)}", "time": "from 2013-01",
-            "key": census_api_key
-        }
-        try:
-            r = requests.get(trade_endpoint, params=params, timeout=15)
-            if r.status_code == 200:
-                data = r.json()
-                for row in data[1:]:
-                    all_rows.append({
-                        'Val': float(row[0]), 'HS': str(row[1]),
-                        'Date': pd.to_datetime(row[4], format='%Y-%m')
-                    })
-            time.sleep(0.1)
-        except Exception as e:
-            print(f"Error on {hs}: {e}")
+    print(" -> Fetching total US trade trend data...")
+    all_ts_rows = []
 
-    if not all_rows:
+    def fetch_ts(flow, endpoint, comm_var, val_var):
+        for hs in codes_to_fetch:
+            params = {
+                "get": f"{val_var},{comm_var}", comm_var: hs,
+                "COMM_LVL": f"HS{len(hs)}", "time": "from 2013-01",
+                "key": census_api_key
+            }
+            try:
+                r = requests.get(endpoint, params=params, timeout=15)
+                if r.status_code == 200:
+                    data = r.json()
+                    for row in data[1:]:
+                        all_ts_rows.append({
+                            'Flow': flow, 'Val': float(row[0]),
+                            'HS': str(row[1]),
+                            'Date': pd.to_datetime(row[4], format='%Y-%m')
+                        })
+                time.sleep(0.1)
+            except Exception as e:
+                print(f"Error on {hs} ({flow}): {e}")
+
+    fetch_ts('Exports', exp_endpoint, 'E_COMMODITY', 'ALL_VAL_MO')
+    fetch_ts('Imports', imp_endpoint, 'I_COMMODITY', 'GEN_VAL_MO')
+
+    if not all_ts_rows:
         print("PIPELINE HALTED: No time-series data retrieved.")
         return
 
-    df_ts = pd.DataFrame(all_rows)
-    df_piv = df_ts.pivot_table(
-        index='Date', columns='HS', values='Val', aggfunc='sum'
-    ).fillna(0)
+    df_ts_raw = pd.DataFrame(all_ts_rows)
 
-    for total, sub in subtraction_map.items():
-        if total in df_piv.columns and sub in df_piv.columns:
-            df_piv[total] = df_piv[total] - df_piv[sub]
+    # Generate Net (Exports - Imports)
+    df_ts_piv = df_ts_raw.pivot_table(
+        index=['Date', 'HS'], columns='Flow', values='Val', aggfunc='sum'
+    ).fillna(0).reset_index()
 
-    df_clean = df_piv.reset_index().melt(
-        id_vars='Date', var_name='HS', value_name='Val'
-    )
+    if 'Exports' not in df_ts_piv.columns:
+        df_ts_piv['Exports'] = 0
+    if 'Imports' not in df_ts_piv.columns:
+        df_ts_piv['Imports'] = 0
+    df_ts_piv['Net'] = df_ts_piv['Exports'] - df_ts_piv['Imports']
+
+    df_ts_net = df_ts_piv[['Date', 'HS', 'Net']].rename(columns={'Net': 'Val'})
+    df_ts_net['Flow'] = 'Net'
+
+    df_ts_combined = pd.concat([df_ts_raw, df_ts_net], ignore_index=True)
 
     final_list = []
-    for hs in df_clean['HS'].unique():
-        sub = df_clean[df_clean['HS'] == hs].sort_values('Date').copy()
-        sub['Smooth'] = sub['Val'].rolling(12).mean() / 1_000_000
-        final_list.append(sub)
+    for flow in ['Exports', 'Imports', 'Net']:
+        df_flow = df_ts_combined[df_ts_combined['Flow'] == flow]
+        df_piv = df_flow.pivot_table(
+            index='Date', columns='HS', values='Val', aggfunc='sum'
+        ).fillna(0)
+
+        for total, sub in subtraction_map.items():
+            if total in df_piv.columns and sub in df_piv.columns:
+                df_piv[total] = df_piv[total] - df_piv[sub]
+
+        df_clean = df_piv.reset_index().melt(
+            id_vars='Date', var_name='HS', value_name='Val'
+        )
+
+        for hs in df_clean['HS'].unique():
+            sub_hs = df_clean[df_clean['HS'] == hs].sort_values('Date').copy()
+            sub_hs['Smooth'] = sub_hs['Val'].rolling(12).mean() / 1_000_000
+            sub_hs['Flow'] = flow
+            final_list.append(sub_hs)
+
     df_plot_ts = pd.concat(final_list)
 
     print(" -> Fetching country-specific data...")
     comp_rows = []
-
     comp_codes = {
         "841581": "Air-to-Air Heat Pumps",
         "853710": "Smart Building Controls",
@@ -3416,83 +3446,123 @@ def plot_exports(census_api_key, output_directory):
         "700800": "Insulating Glass"
     }
 
-    for hs, label in comp_codes.items():
-        for yr in [base_year, latest_year]:
-            params = {
-                "get": "ALL_VAL_MO,CTY_NAME,CTY_CODE", "E_COMMODITY": hs,
-                "CTY_CODE": "*", "COMM_LVL": "HS6", "time": yr,
-                "key": census_api_key
-            }
-            r = requests.get(trade_endpoint, params=params)
-            if r.status_code == 200:
-                data = r.json()
-                headers = data[0]
-                v_idx, n_idx, c_idx = (
-                    headers.index("ALL_VAL_MO"), headers.index("CTY_NAME"),
-                    headers.index("CTY_CODE")
-                )
-                sums = {}
-                for row in data[1:]:
-                    code_str = str(row[c_idx])
-                    if not code_str.isdigit() or not (1000 <= int(code_str) <= 6999):
-                        continue
-                    v_raw = row[v_idx]
-                    v_f = float(v_raw) if v_raw not in [None, '-', ''] else 0.0
-                    sums[row[n_idx]] = sums.get(row[n_idx], 0) + v_f
-                for c_name, total in sums.items():
-                    comp_rows.append({
-                        "Label": label, "Year": yr,
-                        "Value": total, "Country": c_name
-                    })
+    def fetch_comp(flow, endpoint, comm_var, val_var):
+        for hs, label in comp_codes.items():
+            for yr in [base_year, latest_year]:
+                params = {
+                    "get": f"{val_var},CTY_NAME,CTY_CODE", comm_var: hs,
+                    "CTY_CODE": "*", "COMM_LVL": "HS6", "time": yr,
+                    "key": census_api_key
+                }
+                r = requests.get(endpoint, params=params)
+                if r.status_code == 200:
+                    data = r.json()
+                    headers = data[0]
+                    v_idx, n_idx, c_idx = (
+                        headers.index(val_var), headers.index("CTY_NAME"),
+                        headers.index("CTY_CODE")
+                    )
+                    sums = {}
+                    for row in data[1:]:
+                        code_str = str(row[c_idx])
+                        if not code_str.isdigit() or not (1000 <= int(code_str) <= 6999):
+                            continue
+                        v_raw = row[v_idx]
+                        v_f = float(v_raw) if v_raw not in [None, '-', ''] else 0.0
+                        sums[row[n_idx]] = sums.get(row[n_idx], 0) + v_f
+                    for c_name, total in sums.items():
+                        comp_rows.append({
+                            "Flow": flow, "Label": label, "Year": yr,
+                            "Value": total, "Country": c_name
+                        })
+
+    fetch_comp('Exports', exp_endpoint, 'E_COMMODITY', 'ALL_VAL_MO')
+    fetch_comp('Imports', imp_endpoint, 'I_COMMODITY', 'GEN_VAL_MO')
 
     if not comp_rows:
         print("❌ PIPELINE HALTED: No composition data retrieved.")
         return
 
-    df_raw = pd.DataFrame(comp_rows)
-    df_pivot = df_raw.pivot_table(
-        index=['Label', 'Country'], columns='Year', values='Value',
+    df_comp_raw = pd.DataFrame(comp_rows)
+
+    # Calculate Net for country
+    df_comp_piv = df_comp_raw.pivot_table(
+        index=['Label', 'Year', 'Country'], columns='Flow', values='Value',
         aggfunc='sum'
-    ).reset_index().fillna(0)
-    df_pivot.columns = [str(c) for c in df_pivot.columns]
+    ).fillna(0).reset_index()
+    if 'Exports' not in df_comp_piv.columns:
+        df_comp_piv['Exports'] = 0
+    if 'Imports' not in df_comp_piv.columns:
+        df_comp_piv['Imports'] = 0
+    df_comp_piv['Net'] = df_comp_piv['Exports'] - df_comp_piv['Imports']
+    df_comp_net = df_comp_piv[['Label', 'Year', 'Country', 'Net']].rename(
+        columns={'Net': 'Value'}
+    )
+    df_comp_net['Flow'] = 'Net'
 
-    if base_year not in df_pivot.columns:
-        df_pivot[base_year] = 0.0
-    if latest_year not in df_pivot.columns:
-        df_pivot[latest_year] = 0.0
-
-    df_pivot['Change'] = df_pivot[latest_year] - df_pivot[base_year]
+    df_comp_all = pd.concat([df_comp_raw, df_comp_net], ignore_index=True)
 
     final_bar_rows = []
-    for label in df_pivot['Label'].unique():
-        df_sub = df_pivot[df_pivot['Label'] == label].sort_values(
-            latest_year, ascending=False
-        )
-        total_base = df_sub[base_year].sum()
-        total_latest = df_sub[latest_year].sum()
+    for flow in ['Exports', 'Imports', 'Net']:
+        df_f = df_comp_all[df_comp_all['Flow'] == flow]
+        df_pivot = df_f.pivot_table(
+            index=['Label', 'Country'], columns='Year', values='Value',
+            aggfunc='sum'
+        ).reset_index().fillna(0)
+        df_pivot.columns = [str(c) for c in df_pivot.columns]
 
-        div_base = total_base if total_base > 0 else 1
-        div_latest = total_latest if total_latest > 0 else 1
+        if base_year not in df_pivot.columns:
+            df_pivot[base_year] = 0.0
+        if latest_year not in df_pivot.columns:
+            df_pivot[latest_year] = 0.0
 
-        top_5 = df_sub.head(5)
-        for _, row in top_5.iterrows():
-            row_dict = row.to_dict()
-            row_dict['Share_Latest'] = (row[latest_year] / div_latest) * 100
-            row_dict['Growth_Contrib'] = (row['Change'] / div_base) * 100
-            final_bar_rows.append(row_dict)
+        df_pivot['Change'] = df_pivot[latest_year] - df_pivot[base_year]
 
-        others_df = df_sub.iloc[5:]
-        if not others_df.empty:
-            o_base = others_df[base_year].sum()
-            o_latest = others_df[latest_year].sum()
-            o_change = others_df['Change'].sum()
+        for label in df_pivot['Label'].unique():
+            df_sub = df_pivot[df_pivot['Label'] == label].copy()
 
-            final_bar_rows.append({
-                'Label': label, 'Country': 'All Other',
-                base_year: o_base, latest_year: o_latest, 'Change': o_change,
-                'Share_Latest': (o_latest / div_latest) * 100,
-                'Growth_Contrib': (o_change / div_base) * 100
-            })
+            if flow == 'Net':
+                # For net, we sort by absolute magnitude to find the biggest players
+                df_sub['Sort_Val'] = df_sub[latest_year].abs()
+            else:
+                df_sub['Sort_Val'] = df_sub[latest_year]
+
+            df_sub = df_sub.sort_values('Sort_Val', ascending=False)
+
+            total_base = df_sub[base_year].sum()
+            total_latest = df_sub[latest_year].sum()
+
+            if flow == 'Net':
+                # Use absolute sum for division to keep percentages sensible
+                div_latest = df_sub[latest_year].abs().sum()
+                div_base = df_sub[base_year].abs().sum()
+            else:
+                div_latest = total_latest
+                div_base = total_base
+
+            div_latest = div_latest if div_latest != 0 else 1
+            div_base = div_base if div_base != 0 else 1
+
+            top_5 = df_sub.head(5)
+            for _, row in top_5.iterrows():
+                row_dict = row.to_dict()
+                row_dict['Flow'] = flow
+                row_dict['Share_Latest'] = (row[latest_year] / div_latest) * 100
+                row_dict['Growth_Contrib'] = (row['Change'] / div_base) * 100
+                final_bar_rows.append(row_dict)
+
+            others_df = df_sub.iloc[5:]
+            if not others_df.empty:
+                o_base = others_df[base_year].sum()
+                o_latest = others_df[latest_year].sum()
+                o_change = others_df['Change'].sum()
+
+                final_bar_rows.append({
+                    'Flow': flow, 'Label': label, 'Country': 'All Other',
+                    base_year: o_base, latest_year: o_latest, 'Change': o_change,
+                    'Share_Latest': (o_latest / div_latest) * 100,
+                    'Growth_Contrib': (o_change / div_base) * 100
+                })
 
     df_bar = pd.DataFrame(final_bar_rows)
 
@@ -3501,70 +3571,119 @@ def plot_exports(census_api_key, output_directory):
         vertical_spacing=0.15, row_heights=[0.70, 0.30],
         horizontal_spacing=0.08,
         subplot_titles=(
-            "Monthly Value by Export Category<br>"
-            "<sup>Source: <a href='https://www.census.gov/data/developers/data-sets/"
-            "international-trade.html' target='_blank'>Census U.S. Exports of Goods</a>"
+            "Monthly Trade Value by Category<br>"
+            "<sup>Source: <a href='https://www.census.gov/foreign-trade/"
+            "index.html' target='_blank'>Census U.S. Trade Data</a>"
             "</sup>",
             f"% of {latest_year} Total<br>"
-            "<sup>Source: <a href='https://www.census.gov/data/developers/data-sets/"
-            "international-trade.html' target='_blank'>Census U.S. Exports of Goods</a>"
+            "<sup>Source: <a href='https://www.census.gov/foreign-trade/"
+            "index.html' target='_blank'>Census U.S. Trade Data</a>"
             "</sup>",
-            f"% Growth, {base_year}-{latest_year}<br>"
-            "<sup>Source: <a href='https://www.census.gov/data/developers/data-sets/"
-            "international-trade.html' target='_blank'>Census U.S. Exports of Goods</a>"
+            f"% Growth/Decline Contribution, {base_year}-{latest_year}<br>"
+            "<sup>Source: <a href='https://www.census.gov/foreign-trade/"
+            "index.html' target='_blank'>Census U.S. Trade Data</a>"
             "</sup>"
         )
     )
 
     line_palette = px.colors.qualitative.Alphabet
     all_hs_list = [c for sub in trade_dictionary.values() for c in sub]
-
-    for grp_name, hs_list in trade_dictionary.items():
-        for hs in hs_list:
-            d = df_plot_ts[
-                (df_plot_ts['HS'] == hs) & (df_plot_ts['Date'] >= '2014-01-01')
-            ]
-            if not d.empty:
-                c_idx = all_hs_list.index(hs) % len(line_palette)
-                fig.add_trace(go.Scatter(
-                    x=d['Date'], y=d['Smooth'], name=product_labels.get(hs, hs),
-                    line=dict(width=2.5, color=line_palette[c_idx]),
-                    legendgroup=grp_name,
-                    legendgrouptitle_text=f"<b>{grp_name}</b>",
-                    hovertemplate="$%{y:,.1f}M<extra></extra>", legend="legend"
-                ), row=1, col=1)
-
     bar_colors = px.colors.qualitative.Prism
-    u_countries = df_bar['Country'].unique()
-    sorted_countries = [
-        c for c in u_countries if c != 'All Other'
-    ] + ['All Other']
 
-    for idx, country in enumerate(sorted_countries):
-        c_sub = df_bar[df_bar['Country'] == country]
-        color = ('rgb(180,180,180)' if country == 'All Other'
-                 else bar_colors[idx % len(bar_colors)])
+    flows = ['Exports', 'Imports', 'Net']
+    trace_indices = {f: [] for f in flows}
+    current_trace_idx = 0
 
-        fig.add_trace(go.Bar(
-            name=country, x=c_sub['Label'], y=c_sub['Share_Latest'],
-            marker_color=color, legend="legend2",
-            hovertemplate=(
-                "<b>" + country + "</b><br>Share: %{y:.1f}%<extra></extra>"
-            )
-        ), row=2, col=1)
+    # Build traces for each flow state
+    for flow in flows:
+        # Lines (Top Plot)
+        for grp_name, hs_list in trade_dictionary.items():
+            for hs in hs_list:
+                d = df_plot_ts[
+                    (df_plot_ts['HS'] == hs) &
+                    (df_plot_ts['Date'] >= '2014-01-01') &
+                    (df_plot_ts['Flow'] == flow)
+                ]
+                if not d.empty:
+                    c_idx = all_hs_list.index(hs) % len(line_palette)
+                    fig.add_trace(go.Scatter(
+                        x=d['Date'], y=d['Smooth'],
+                        name=product_labels.get(hs, hs),
+                        line=dict(width=2.5, color=line_palette[c_idx]),
+                        legendgroup=grp_name,
+                        legendgrouptitle_text=f"<b>{grp_name}</b>",
+                        hovertemplate="$%{y:,.1f}M<extra></extra>",
+                        legend="legend", visible=(flow == 'Exports')
+                    ), row=1, col=1)
+                    trace_indices[flow].append(current_trace_idx)
+                    current_trace_idx += 1
 
-        fig.add_trace(go.Bar(
-            name=country, x=c_sub['Label'], y=c_sub['Growth_Contrib'],
-            marker_color=color, showlegend=False, legend="legend2",
-            hovertemplate=(
-                "<b>" + country + "</b><br>Added to Growth: "
-                "%{y:.1f}%<extra></extra>"
-            )
-        ), row=2, col=2)
+        # Bars (Bottom Plots)
+        df_bar_flow = df_bar[df_bar['Flow'] == flow]
+        u_countries = df_bar_flow['Country'].unique()
+        sorted_countries = [
+            c for c in u_countries if c != 'All Other'
+        ] + ['All Other']
 
+        for idx, country in enumerate(sorted_countries):
+            c_sub = df_bar_flow[df_bar_flow['Country'] == country]
+            color = ('rgb(180,180,180)' if country == 'All Other'
+                     else bar_colors[idx % len(bar_colors)])
+
+            fig.add_trace(go.Bar(
+                name=country, x=c_sub['Label'], y=c_sub['Share_Latest'],
+                marker_color=color, legend="legend2",
+                hovertemplate=(
+                    "<b>" + country + "</b><br>Share: %{y:.1f}%<extra></extra>"
+                ), visible=(flow == 'Exports')
+            ), row=2, col=1)
+            trace_indices[flow].append(current_trace_idx)
+            current_trace_idx += 1
+
+            fig.add_trace(go.Bar(
+                name=country, x=c_sub['Label'], y=c_sub['Growth_Contrib'],
+                marker_color=color, showlegend=False, legend="legend2",
+                hovertemplate=(
+                    "<b>" + country + "</b><br>Contribution: "
+                    "%{y:.1f}%<extra></extra>"
+                ), visible=(flow == 'Exports')
+            ), row=2, col=2)
+            trace_indices[flow].append(current_trace_idx)
+            current_trace_idx += 1
+
+    def create_visibility_array(active_flow):
+        return [
+            i in trace_indices[active_flow]
+            for i in range(current_trace_idx)
+        ]
+
+    # Setup the dropdown menu and layout
     fig.update_layout(
         template="plotly_white", height=1300, barmode='relative',
         hovermode="x unified",
+        updatemenus=[
+            dict(
+                type="buttons",
+                direction="right",
+                x=1.0, y=1.12,
+                xanchor="right", yanchor="bottom",
+                buttons=[
+                    dict(
+                        label="Exports", method="update",
+                        args=[{"visible": create_visibility_array('Exports')}]
+                    ),
+                    dict(
+                        label="Imports", method="update",
+                        args=[{"visible": create_visibility_array('Imports')}]
+                    ),
+                    dict(
+                        label="Net (Exp - Imp)", method="update",
+                        args=[{"visible": create_visibility_array('Net')}]
+                    )
+                ],
+                showactive=True, bgcolor="white", bordercolor="gray", borderwidth=1
+            )
+        ],
         legend=dict(
             groupclick="toggleitem", traceorder="grouped",
             yanchor="top", y=1.0, xanchor="left", x=1.02
@@ -3573,12 +3692,12 @@ def plot_exports(census_api_key, output_directory):
             title="<b>Country</b>", traceorder="normal",
             yanchor="top", y=0.32, xanchor="left", x=1.02
         ),
-        margin={"r": 150, "t": 50, "l": 20, "b": 50}
+        margin={"r": 150, "t": 80, "l": 20, "b": 50}
     )
 
     fig.update_yaxes(title_text="Value ($M, 12-Mo. Avg.)", row=1, col=1)
-    fig.update_yaxes(title_text="% of Total Export Market", row=2, col=1)
-    fig.update_yaxes(title_text="% Growth", row=2, col=2)
+    fig.update_yaxes(title_text="% of Total Market", row=2, col=1)
+    fig.update_yaxes(title_text="% Contribution", row=2, col=2)
 
     custom_x_order = [
         "Air-to-Air Heat Pumps", "Insulating Glass", "Mineral Insulation",
@@ -3592,9 +3711,9 @@ def plot_exports(census_api_key, output_directory):
         categoryorder='array', categoryarray=custom_x_order, row=2, col=2
     )
 
-    output_file = f"{output_directory}/exports.html"
+    output_file = f"{output_directory}/exports_imports.html"
     fig.write_html(output_file)
-    print(f"Exports HTML complete: {output_file}")
+    print(f"Trade HTML complete: {output_file}")
 
 
 def find_latest_eia_861_year():

@@ -2415,23 +2415,28 @@ def plot_gdp_by_building_type(bea_key, output_dir):
     df = df[(df['Year'] >= min_gdp_year) & (df['Year'] <= max_gdp_year)]
 
     mapping = {
-        '53': 'Residential (Real Estate & Housing)',
-        '44RT': 'Commercial (Offices, Retail, Services)',
-        '51': 'Commercial (Offices, Retail, Services)',
-        '52': 'Commercial (Offices, Retail, Services)',
-        '54': 'Commercial (Offices, Retail, Services)',
-        '55': 'Commercial (Offices, Retail, Services)',
-        '56': 'Commercial (Offices, Retail, Services)',
-        '61': 'Commercial (Offices, Retail, Services)',
-        '62': 'Commercial (Offices, Retail, Services)',
-        '71': 'Commercial (Offices, Retail, Services)',
-        '72': 'Commercial (Offices, Retail, Services)',
-        '81': 'Commercial (Offices, Retail, Services)',
-        'G': 'Commercial (Offices, Retail, Services)',
-        '11': 'Industrial / Other', '21': 'Industrial / Other',
-        '22': 'Industrial / Other', '23': 'Industrial / Other',
-        '31G': 'Industrial / Other', '42': 'Industrial / Other',
-        '48TW': 'Industrial / Other'
+        'HS': 'Residential (Housing Services)',
+        'ORE': 'Offices & Professional',
+        '532RL': 'Other (Equipment/Intangibles)',
+        '44RT': 'Retail, Food & Hospitality',
+        '51': 'Offices & Professional',
+        '52': 'Offices & Professional',
+        '54': 'Offices & Professional',
+        '55': 'Offices & Professional',
+        '56': 'Offices & Professional',
+        '61': 'Institutional & Public',
+        '62': 'Institutional & Public',
+        '71': 'Retail, Food & Hospitality',
+        '72': 'Retail, Food & Hospitality',
+        '81': 'Retail, Food & Hospitality',
+        'G': 'Institutional & Public',
+        '11': 'Agriculture & Extraction',
+        '21': 'Agriculture & Extraction',
+        '22': 'Construction & Utilities',
+        '23': 'Construction & Utilities',
+        '31G': 'Manufacturing & Warehousing',
+        '42': 'Manufacturing & Warehousing',
+        '48TW': 'Manufacturing & Warehousing'
     }
 
     df_filtered = df[df['Industry'].isin(mapping.keys())].copy()
@@ -2440,22 +2445,42 @@ def plot_gdp_by_building_type(bea_key, output_dir):
     df_agg = df_filtered.groupby(
         ['Year', 'Category']
     )['DataValue'].sum().reset_index()
+
     total_gdp = df_agg.groupby('Year')['DataValue'].sum().reset_index()
     total_gdp.rename(columns={'DataValue': 'Total_GDP'}, inplace=True)
+
     df_agg = pd.merge(df_agg, total_gdp, on='Year')
     df_agg['Share'] = (df_agg['DataValue'] / df_agg['Total_GDP']) * 100
 
+    # Order of the stacked area chart from bottom to top
     cat_order = [
-        'Industrial / Other',
-        'Residential (Real Estate & Housing)',
-        'Commercial (Offices, Retail, Services)'
+        'Other (Equipment/Intangibles)',
+        'Agriculture & Extraction',
+        'Construction & Utilities',
+        'Manufacturing & Warehousing',
+        'Institutional & Public',
+        'Retail, Food & Hospitality',
+        'Offices & Professional',
+        'Residential (Housing Services)'
     ]
 
     fig = go.Figure()
+
+    # NEW: Color palette grouped logically by family
     colors = {
-        'Commercial (Offices, Retail, Services)': '#1f77b4',
-        'Residential (Real Estate & Housing)': '#ff7f0e',
-        'Industrial / Other': '#7f7f7f'
+        # Commercial Family (Shades of Blue)
+        'Offices & Professional': '#08519c',         # Dark Blue
+        'Retail, Food & Hospitality': '#3182bd',     # Medium Blue
+        'Institutional & Public': '#6baed6',         # Light Blue
+
+        # Residential Family (Shades of Orange)
+        'Residential (Housing Services)': '#ff7f0e', # Standard Orange
+
+        # Industrial Family (Shades of Gray)
+        'Manufacturing & Warehousing': '#525252',    # Dark Gray
+        'Construction & Utilities': '#737373',       # Medium-Dark Gray
+        'Agriculture & Extraction': '#969696',       # Medium-Light Gray
+        'Other (Equipment/Intangibles)': '#bdbdbd'   # Light Gray
     }
 
     for cat in cat_order:
@@ -2487,6 +2512,10 @@ def plot_gdp_by_building_type(bea_key, output_dir):
     )
 
     fig.update_xaxes(dtick=2)
+
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+
     html_path = f"{output_dir}/gdp_contributions.html"
     fig.write_html(html_path, default_width='100%', default_height='100%')
     print(f" -> Success! GDP wedge HTML saved to {html_path}")

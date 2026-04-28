@@ -3597,8 +3597,8 @@ def plot_exports(census_api_key, output_directory):
 
     fig = make_subplots(
         rows=2, cols=2, specs=[[{"colspan": 2}, None], [{}, {}]],
-        vertical_spacing=0.15, row_heights=[0.70, 0.30],
-        horizontal_spacing=0.08,
+        vertical_spacing=0.08, row_heights=[0.60, 0.40],
+        horizontal_spacing=0.15,
         subplot_titles=(
             "Monthly Trade Value by Category<br>"
             "<sup>Source: <a href='https://www.census.gov/foreign-trade/"
@@ -3608,7 +3608,7 @@ def plot_exports(census_api_key, output_directory):
             "<sup>Source: <a href='https://www.census.gov/foreign-trade/"
             "index.html' target='_blank'>Census U.S. Trade Data</a>"
             "</sup>",
-            f"% Growth/Decline Contribution, {base_year}-{latest_year}<br>"
+            f"% Change, {base_year}-{latest_year}<br>"
             "<sup>Source: <a href='https://www.census.gov/foreign-trade/"
             "index.html' target='_blank'>Census U.S. Trade Data</a>"
             "</sup>"
@@ -3673,7 +3673,7 @@ def plot_exports(census_api_key, output_directory):
                 name=country, x=c_sub['Label'], y=c_sub['Growth_Contrib'],
                 marker_color=color, showlegend=False, legend="legend2",
                 hovertemplate=(
-                    "<b>" + country + "</b><br>Contribution: "
+                    "<b>" + country + "</b><br>Change: "
                     "%{y:.1f}%<extra></extra>"
                 ), visible=(flow == 'Exports')
             ), row=2, col=2)
@@ -3694,7 +3694,7 @@ def plot_exports(census_api_key, output_directory):
             dict(
                 type="buttons",
                 direction="right",
-                x=1.0, y=1.12,
+                x=1.0, y=1.05,
                 xanchor="right", yanchor="bottom",
                 buttons=[
                     dict(
@@ -3715,7 +3715,9 @@ def plot_exports(census_api_key, output_directory):
         ],
         legend=dict(
             groupclick="toggleitem", traceorder="grouped",
-            yanchor="top", y=1.0, xanchor="left", x=1.02
+            yanchor="top", y=1, xanchor="left", x=1.02,
+            tracegroupgap=2,
+            font=dict(size=11)
         ),
         legend2=dict(
             title="<b>Country</b>", traceorder="normal",
@@ -3726,7 +3728,7 @@ def plot_exports(census_api_key, output_directory):
 
     fig.update_yaxes(title_text="Value ($M, 12-Mo. Avg.)", row=1, col=1)
     fig.update_yaxes(title_text="% of Total Market", row=2, col=1)
-    fig.update_yaxes(title_text="% Contribution", row=2, col=2)
+    fig.update_yaxes(title_text="% Change", row=2, col=2)
 
     custom_x_order = [
         "Air-to-Air Heat Pumps", "Insulating Glass", "Mineral Insulation",

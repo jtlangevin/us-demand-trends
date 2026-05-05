@@ -2,8 +2,8 @@ name: Energy Data Update
 
 on:
   schedule:
-    # Runs Jan 1st, Apr 1st, Jul 1st, Oct 1st
-    - cron: '0 0 1 1,4,7,10 *'
+    # Runs monthly
+    - cron: '0 0 1 * *'
   workflow_dispatch: # Allows you to manually trigger a run with a button click
 
 permissions:

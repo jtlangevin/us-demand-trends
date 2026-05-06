@@ -1377,7 +1377,7 @@ def plot_ann_elec_sales(output_dir):
 
 
 def extract_peak_data(year):
-    """Targets Operational_Data and flattens multi-row headers."""
+    """Targets Operational_Data and flattens multi-row headers. Filters out double-counting."""
     urls = [
         f"https://www.eia.gov/electricity/data/eia861/zip/f861{year}.zip",
         ("https://www.eia.gov/electricity/data/eia861/archive/zip/"
@@ -1442,31 +1442,55 @@ def extract_peak_data(year):
                         return i
                 return None
 
-            idx_uid = find_idx(['utility', 'number']) or find_idx(
-                ['utility', 'id']
-            )
+            # Base Indices
+            idx_uid = find_idx(['utility', 'number']) or find_idx(['utility', 'id'])
             idx_st = find_idx(['state'])
             idx_sum = find_idx(['summer', 'peak']) or find_idx(
-                ['summer', 'demand']
-            ) or find_idx(['summer', 'max'])
+                ['summer', 'demand']) or find_idx(['summer', 'max'])
             idx_win = find_idx(['winter', 'peak']) or find_idx(
-                ['winter', 'demand']
-            ) or find_idx(['winter', 'max'])
+                ['winter', 'demand']) or find_idx(['winter', 'max'])
+
+            # New Filter Indices
+            idx_name = find_idx(['utility', 'name'])
+            idx_ent = find_idx(['entity'])
+            if idx_ent is None:
+                idx_ent = find_idx(['ownership'])
 
             if None in [idx_uid, idx_st, idx_sum, idx_win]:
                 return None
 
+            # Extract filter columns cleanly (defaults to empty string if column is missing to
+            # prevent crashes)
+            ent_s = df_raw.iloc[:, idx_ent].astype(str).str.lower() if idx_ent is not None else ''
+            nm_s = df_raw.iloc[:, idx_name].astype(str).str.lower() if idx_name is not None else ''
+
+            # Build initial dataframe
             res_df = pd.DataFrame({
                 'Util_ID': df_raw.iloc[:, idx_uid],
                 'State': df_raw.iloc[:, idx_st],
-                'Summer_MW': pd.to_numeric(
-                    df_raw.iloc[:, idx_sum], errors='coerce'
-                ).fillna(0),
-                'Winter_MW': pd.to_numeric(
-                    df_raw.iloc[:, idx_win], errors='coerce'
-                ).fillna(0)
+                'Utility_Name': nm_s,
+                'Entity': ent_s,
+                'Summer_MW': pd.to_numeric(df_raw.iloc[:, idx_sum], errors='coerce').fillna(0),
+                'Winter_MW': pd.to_numeric(df_raw.iloc[:, idx_win], errors='coerce').fillna(0)
             })
+
+            # --- APPLY DOUBLE-COUNTING FILTERS ---
+            # Added 'behind the meter' to Entity exclusions
+            exclude_types = ('marketer|retail power|community choice aggregator|mktg authority|'
+                             'transmission|behind the meter')
+            res_df = res_df[~res_df['Entity'].str.contains(exclude_types, na=False)]
+
+            # Expanded name exclusions to catch G&Ts and Power Authorities
+            exclude_names = ('power agency|power authority|power pooling|wholesale|generation '
+                             '& transmission|g&t|g & t')
+            res_df = res_df[~res_df['Utility_Name'].str.contains(exclude_names, na=False)]
+
+            # Drop the temporary filter columns so the shape identically matches what the
+            # plotter expects
+            res_df = res_df.drop(columns=['Utility_Name', 'Entity'])
+
             return res_df.dropna(subset=['Util_ID'])
+
     except Exception as e:
         print(f"Error: {e}")
         return None
@@ -1554,12 +1578,16 @@ def plot_peak_data(output_dir):
          st[f'Winter_MW_{base_year_suff}']) /
         (st[f'Winter_MW_{base_year_suff}'] + 1)
     ) * 100
+    # Round to manage tooltips
+    st['Winter_Growth'] = st['Winter_Growth'].round(0)
 
     st['Summer_Growth'] = (
         (st[f'Summer_MW_{latest_yr_suff}'] -
          st[f'Summer_MW_{base_year_suff}']) /
         (st[f'Summer_MW_{base_year_suff}'] + 1)
     ) * 100
+    # Round to manage tooltips
+    st['Summer_Growth'] = st['Summer_Growth'].round(0)
 
     fig = make_subplots(
         rows=2, cols=2,
@@ -1589,7 +1617,7 @@ def plot_peak_data(output_dir):
 
     hover_text = (
         st['State'] + "<br>Max Peak: " +
-        st['Max_MW'].apply(lambda x: f"{x:,.0f} MW") +
+        st['Max_MW'].apply(lambda x: f"{x/1000:,.1f} GW") +
         "<br>Ratio: " + st['Ratio'].round(2).astype(str)
     )
 
@@ -1612,7 +1640,7 @@ def plot_peak_data(output_dir):
         x=st_winter['State'], y=st_winter['Winter_Growth'],
         marker_color='#1f77b4', name='Winter Growth',
         hovertemplate=(
-            "State: %{x}<br>Winter Growth: %{y:+.1f}%<extra></extra>"
+            "State: %{x}<br>Winter Growth: %{y:+.0f}%<extra></extra>"
         )
     ), row=2, col=1)
 
@@ -1621,7 +1649,7 @@ def plot_peak_data(output_dir):
         x=st_summer['State'], y=st_summer['Summer_Growth'],
         marker_color='#ff7f0e', name='Summer Growth',
         hovertemplate=(
-            "State: %{x}<br>Summer Growth: %{y:+.1f}%<extra></extra>"
+            "State: %{x}<br>Summer Growth: %{y:+.0f}%<extra></extra>"
         )
     ), row=2, col=2)
 
@@ -2474,7 +2502,7 @@ def plot_gdp_by_building_type(bea_key, output_dir):
         'Institutional & Public': '#6baed6',         # Light Blue
 
         # Residential Family (Shades of Orange)
-        'Residential (Housing Services)': '#ff7f0e', # Standard Orange
+        'Residential (Housing Services)': '#ff7f0e',  # Standard Orange
 
         # Industrial Family (Shades of Gray)
         'Manufacturing & Warehousing': '#525252',    # Dark Gray

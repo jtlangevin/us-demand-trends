@@ -1863,12 +1863,19 @@ def plot_utility_costs(year, output_dir):
     for cat in pillars:
         fig.add_trace(go.Bar(
             name=cat, x=top_s['State'], y=top_s[cat],
-            marker_color=colors[cat], showlegend=True
+            marker_color=colors[cat], showlegend=True,
+            hovertemplate=f"<b>%{{x}}</b><br>{cat}: $%{{y:.1f}}B<extra></extra>"
         ), row=1, col=1)
+
         fig.add_trace(go.Bar(
             name=cat, x=ca_t['report_year'], y=ca_t[cat],
-            marker_color=colors[cat], showlegend=False
+            marker_color=colors[cat], showlegend=False,
+            hovertemplate=f"<b>%{{x}}</b><br>{cat}: $%{{y:.1f}}B<extra></extra>"
         ), row=2, col=1)
+
+    # Add y-axis titles
+    fig.update_yaxes(title_text="Cost ($ Billions)", row=1, col=1)
+    fig.update_yaxes(title_text="Cost ($ Billions)", row=2, col=1)
 
     fig.update_layout(height=1000, barmode='stack', template="plotly_white")
     html_path = f"{output_dir}/utility_costs.html"
@@ -2006,11 +2013,12 @@ def plot_dsm_comprehensive_dashboard(latest_yr, output_dir):
         state_stats[f'EE_Gr_{sect}'] = (
             state_stats[f'EE_{sect}_{latest_yr}'] -
             state_stats[f'EE_{sect}_{base_year}']
-        )
+        ).round(1)
+
         state_stats[f'DR_Gr_{sect}'] = (
             state_stats[f'DR_Pot_{sect}_{latest_yr}'] -
             state_stats[f'DR_Pot_{sect}_{base_year}']
-        )
+        ).round(1)
 
     state_stats['EE_State_Growth'] = (
         state_stats[f'EE_Total_{latest_yr}'] -
@@ -2187,20 +2195,14 @@ def plot_dsm_comprehensive_dashboard(latest_yr, output_dir):
         fig.add_trace(go.Bar(
             x=top15_ee['State'], y=top15_ee[f'EE_Gr_{suffix}'],
             name=label, marker_color=colors[suffix], legendgroup=label,
-            hovertemplate=(
-                f"<b>%{{x}} - {label}</b><br>"
-                "Growth: %{{y:+.1f}} MW<extra></extra>"
-            )
+            hovertemplate=f"<b>%{{x}} - {label}</b><br>Growth: %{{y:+.1f}} MW<extra></extra>"
         ), row=2, col=1)
 
         fig.add_trace(go.Bar(
             x=top15_dr['State'], y=top15_dr[f'DR_Gr_{suffix}'],
             name=label, marker_color=colors[suffix], legendgroup=label,
             showlegend=False,
-            hovertemplate=(
-                f"<b>%{{x}} - {label}</b><br>"
-                "Growth: %{{y:+.1f}} MW<extra></extra>"
-            )
+            hovertemplate=f"<b>%{{x}} - {label}</b><br>Growth: %{{y:+.1f}} MW<extra></extra>"
         ), row=2, col=2)
 
     geo_config = dict(

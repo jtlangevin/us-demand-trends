@@ -31,6 +31,36 @@ from dotenv import load_dotenv
 import time
 from datetime import datetime
 
+
+def inject_ga_tag(filepath):
+    """Injects the Google Analytics snippet into a raw HTML file."""
+    ga_id = "G-YF8H2FKSTR"
+
+    ga_snippet = f"""
+    <script async src="https://www.googletagmanager.com/gtag/js?id={ga_id}"></script>
+    <script>
+      window.dataLayer = window.dataLayer || [];
+      function gtag(){{dataLayer.push(arguments);}}
+      gtag('js', new Date());
+      gtag('config', '{ga_id}');
+    </script>
+    """
+
+    # Read the Plotly HTML file
+    with open(filepath, 'r', encoding='utf-8') as f:
+        html = f.read()
+
+    # Inject the snippet right before the closing </head> tag
+    if '</head>' in html:
+        html = html.replace('</head>', ga_snippet + '\n</head>')
+    else:
+        html += ga_snippet
+
+    # Save it back
+    with open(filepath, 'w', encoding='utf-8') as f:
+        f.write(html)
+
+
 # Suppress geometry warnings for cleaner output
 warnings.filterwarnings("ignore", category=ShapelyDeprecationWarning)
 warnings.filterwarnings("ignore", message=".*Geometry is in a geographic CRS.*")
@@ -202,12 +232,13 @@ def plot_energy_burden(output_dir):
     )
     fig.update_yaxes(title_text="State", row=2, col=1)
 
-    html_maps_path = f"{output_dir}/energy_burden_maps_bar.html"
+    html_path = f"{output_dir}/energy_burden_maps_bar.html"
     fig.write_html(
-        html_maps_path, default_width='95%', default_height='100%',
+        html_path, default_width='95%', default_height='100%',
         config={'scrollZoom': True}
     )
-    print(f" -> Success! Energy burden HTML saved to {html_maps_path}")
+    inject_ga_tag(html_path)
+    print(f" -> Success! Energy burden HTML saved to {html_path}")
 
 
 def plot_fuel_price_ratio(eia_key, output_dir):
@@ -376,12 +407,13 @@ def plot_fuel_price_ratio(eia_key, output_dir):
     )
     fig.update_yaxes(title_text="State", row=2, col=1)
 
-    html_maps_path = f"{output_dir}/fuel_price_ratio_maps_bar.html"
+    html_path = f"{output_dir}/fuel_price_ratio_maps_bar.html"
     fig.write_html(
-        html_maps_path, default_width='95%', default_height='100%',
+        html_path, default_width='95%', default_height='100%',
         config={'scrollZoom': True}
     )
-    print(f" -> Success! Fuel price HTML saved to {html_maps_path}")
+    inject_ga_tag(html_path)
+    print(f" -> Success! Fuel price HTML saved to {html_path}")
 
 
 def fetch_and_clean_census_regions():
@@ -905,12 +937,13 @@ def plot_permits_construction(census_key, output_dir):
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
 
-    html_maps_path = f"{output_dir}/permits_construction_costs.html"
+    html_path = f"{output_dir}/permits_construction_costs.html"
     fig.write_html(
-        html_maps_path, default_width='95%', default_height='100%',
+        html_path, default_width='95%', default_height='100%',
         config={'scrollZoom': True}
     )
-    print(f" -> Success! Construction HTML saved to {html_maps_path}")
+    inject_ga_tag(html_path)
+    print(f" -> Success! Construction HTML saved to {html_path}")
 
 
 def plot_county_heating_equipment(census_key, output_dir):
@@ -1065,6 +1098,7 @@ def plot_county_heating_equipment(census_key, output_dir):
         html_path, default_width='100%', default_height='100%',
         config={'scrollZoom': True}
     )
+    inject_ga_tag(html_path)
     print(f" -> Success! Heating equipment map HTML saved to {html_path}")
 
 
@@ -1373,6 +1407,7 @@ def plot_ann_elec_sales(output_dir):
         html_path, default_width='100%', default_height='100%',
         config={'scrollZoom': True}
     )
+    inject_ga_tag(html_path)
     print(f" -> Success! Annual sales plots saved to {html_path}")
 
 
@@ -1679,6 +1714,7 @@ def plot_peak_data(output_dir):
         html_path, default_width='100%', default_height='100%',
         config={'scrollZoom': True}
     )
+    inject_ga_tag(html_path)
     print(f" -> Success! Peak demand plots saved to {html_path}")
 
 
@@ -1880,6 +1916,7 @@ def plot_utility_costs(year, output_dir):
     fig.update_layout(height=1000, barmode='stack', template="plotly_white")
     html_path = f"{output_dir}/utility_costs.html"
     fig.write_html(html_path, default_width='100%', default_height='100%')
+    inject_ga_tag(html_path)
     print(f" -> Success! Utility cost plots saved to {html_path}")
 
 
@@ -2229,6 +2266,7 @@ def plot_dsm_comprehensive_dashboard(latest_yr, output_dir):
         html_path, default_width='100%', default_height='100%',
         config={'scrollZoom': True}
     )
+    inject_ga_tag(html_path)
     print(f"-> Success! DSM potential plots saved to {html_path}")
 
 
@@ -2384,6 +2422,7 @@ def plot_building_jobs_trend(bls_key, output_dir):
 
     html_path = f"{output_dir}/building_jobs_trend.html"
     fig.write_html(html_path, default_width='100%', default_height='100%')
+    inject_ga_tag(html_path)
     print(f" -> Success! Buildings jobs HTML saved to {html_path}")
 
 
@@ -2548,6 +2587,7 @@ def plot_gdp_by_building_type(bea_key, output_dir):
 
     html_path = f"{output_dir}/gdp_contributions.html"
     fig.write_html(html_path, default_width='100%', default_height='100%')
+    inject_ga_tag(html_path)
     print(f" -> Success! GDP wedge HTML saved to {html_path}")
 
 
@@ -2857,12 +2897,13 @@ def plot_ferc_load_growth_forecasts(output_dir):
         html_path, default_width='100%', default_height='100%',
         config={'scrollZoom': True}
     )
+    inject_ga_tag(html_path)
     print(f" -> Success! Load forecasts HTML ({len(df_map)} Planning Areas).")
 
 
-def plot_insurance_costs(output_dir):
-    """Fetches 2023 ACS 5-Year estimates and calculates median costs."""
-    print("Plotting: Homeowner insurance costs (ACS 2023)...")
+def plot_insurance_costs(census_key, output_dir):
+    """Fetches ACS 5-Year estimates and calculates median costs."""
+    print("Plotting: Homeowner insurance costs (ACS)...")
 
     target_year = pd.Timestamp.now().year
     success_acs = False
@@ -2878,22 +2919,33 @@ def plot_insurance_costs(output_dir):
         for m_suffix, nm_suffix in bucket_suffixes:
             variables.extend([f'B25141_{m_suffix}E', f'B25141_{nm_suffix}E'])
 
-        api_url = (
-            f"https://api.census.gov/data/{target_year}/acs/acs5?"
-            f"get={','.join(variables)}&for=county:*"
-        )
+        # 2. Separate the base URL from the parameters
+        api_url = f"https://api.census.gov/data/{target_year}/acs/acs5"
+
+        # 3. Build a proper params dictionary with the key included
+        params = {
+            "get": ','.join(variables),
+            "for": "county:*",
+            "key": census_key
+        }
 
         try:
             print(f" -> Checking Census ACS API for {target_year}...")
-            res = requests.get(api_url, timeout=15)
+            # 4. Pass the params to the requests.get() method
+            res = requests.get(api_url, params=params, timeout=15)
+
             if res.status_code == 200:
                 data = res.json()
                 df_acs = pd.DataFrame(data[1:], columns=data[0])
                 print(f" -> Success! Found ACS data for {target_year}.")
                 success_acs = True
                 break
-        except Exception:
-            pass
+            else:
+                # Print the error so it doesn't fail silently if something else goes wrong!
+                print(f"    [!] Failed with status {res.status_code}: {res.text[:50]}")
+        except Exception as e:
+            print(f"    [!] Request error: {e}")
+
         target_year -= 1
 
     if not success_acs:
@@ -3000,6 +3052,7 @@ def plot_insurance_costs(output_dir):
         html_path, default_width='100%', default_height='100%',
         config={'scrollZoom': True}
     )
+    inject_ga_tag(html_path)
     print(f" -> Success! Insurance costs HTML saved to {html_path}")
 
 
@@ -3370,6 +3423,7 @@ def plot_price_expend_benchmarks(output_dir):
 
         html_path = f"{output_dir}/price_expend_trend.html"
         fig.write_html(html_path, default_width="100%", default_height="100%")
+        inject_ga_tag(html_path)
         print(f" -> Success! Price and expenditure HTML saved to {html_path}")
 
         return df_master
@@ -3772,9 +3826,10 @@ def plot_exports(census_api_key, output_directory):
         categoryorder='array', categoryarray=custom_x_order, row=2, col=2
     )
 
-    output_file = f"{output_directory}/exports_imports.html"
-    fig.write_html(output_file)
-    print(f"Trade HTML complete: {output_file}")
+    html_path = f"{output_directory}/exports_imports.html"
+    fig.write_html(html_path)
+    inject_ga_tag(html_path)
+    print(f"Trade HTML complete: {html_path}")
 
 
 def find_latest_eia_861_year():
@@ -3832,7 +3887,7 @@ def main():
         plot_building_jobs_trend(bls_key, output_dir)
         plot_gdp_by_building_type(bea_key, output_dir)
         plot_ferc_load_growth_forecasts(output_dir)
-        plot_insurance_costs(output_dir)
+        plot_insurance_costs(census_key, output_dir)
         plot_price_expend_benchmarks(output_dir)
         plot_exports(census_key, output_dir)
 

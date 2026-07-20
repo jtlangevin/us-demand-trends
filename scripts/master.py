@@ -1460,10 +1460,11 @@ def extract_peak_data(year):
 
             flat_cols = []
             for col_idx in range(len(df_h.columns)):
-                combined = "_".join(
-                    df_h.iloc[:, col_idx].astype(str).replace('nan', '')
-                    .str.lower().str.strip()
-                )
+                # Safely convert all items to string, lowercase, and strip whitespace in Python
+                clean_vals = [str(val).lower().strip() for val in df_h.iloc[:, col_idx]]
+                # Filter out the literal 'nan', 'none', or empty strings
+                valid_vals = [v for v in clean_vals if v not in ['nan', 'none', '']]
+                combined = "_".join(valid_vals)
                 flat_cols.append(combined)
 
             df_raw = pd.read_excel(

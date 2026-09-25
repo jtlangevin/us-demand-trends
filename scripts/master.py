@@ -3830,7 +3830,7 @@ def plot_exports(census_api_key, output_directory):
     html_path = f"{output_directory}/exports_imports.html"
     fig.write_html(html_path)
     inject_ga_tag(html_path)
-    print(f"Trade HTML complete: {html_path}")
+    print(f" -> Success! Trade HTML complete: {html_path}")
 
 
 def find_latest_eia_861_year():

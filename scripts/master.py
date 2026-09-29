@@ -2784,12 +2784,43 @@ def plot_ferc_load_growth_forecasts(output_dir):
         'respondent_id_ferc714'
     )[['lon', 'lat']].mean().reset_index()
 
-    df_map = pd.merge(df_growth, ba_centroids, on='respondent_id_ferc714')
+    # 1. First merge names, then left-join spatial centroids so missing ones aren't dropped
     df_map = pd.merge(
-        df_map,
-        df_crosswalk[['respondent_id_ferc714', 'respondent_name_ferc714']],
-        on='respondent_id_ferc714'
+        df_growth,
+        df_crosswalk[['respondent_id_ferc714', 'respondent_name_ferc714']].drop_duplicates(),
+        on='respondent_id_ferc714', how='left'
     )
+    df_map = pd.merge(df_map, ba_centroids, on='respondent_id_ferc714', how='left')
+
+    # 2. Western Balancing Authority & G&T coordinate fallback dictionary
+    western_coords_fallback = {
+        'pacificorp': (40.76, -111.89),            # Utah / PacifiCorp East (Salt Lake City)
+        'public service co of colorado': (39.73, -104.99), # Xcel / PSCO (Denver)
+        'tri-state': (39.84, -105.02),             # Tri-State G&T (Westminster, CO)
+        'western area': (40.01, -105.27),          # WAPA / WACM
+        'deseret': (40.30, -109.53),               # Deseret G&T (Utah)
+        'platte river': (40.58, -105.08),          # PRPA (Northern CO)
+        'black hills': (44.08, -103.23),           # Black Hills Power (WY/SD/CO)
+        'idaho power': (43.61, -116.20),           # Idaho Power (Boise, ID)
+        'arizona public service': (33.44, -112.07),# APS (Phoenix, AZ)
+        'tucson electric': (32.22, -110.97),       # TEP (Tucson, AZ)
+        'nevada power': (36.17, -115.13),          # NV Energy South (Las Vegas)
+        'sierra pacific': (39.52, -119.81),        # NV Energy North (Reno)
+        'el paso electric': (31.76, -106.48)       # EPE (TX/NM)
+    }
+
+    # 3. Fill missing lat/lon using the fallback dictionary
+    def fill_western_coords(row):
+        lat_val = row['lat']
+        lon_val = row['lon']
+        if pd.isna(lat_val) or pd.isna(lon_val):
+            name = str(row['respondent_name_ferc714']).lower()
+            for key, (f_lat, f_lon) in western_coords_fallback.items():
+                if key in name:
+                    return pd.Series({'lat': f_lat, 'lon': f_lon})
+        return pd.Series({'lat': lat_val, 'lon': lon_val})
+
+    df_map[['lat', 'lon']] = df_map.apply(fill_western_coords, axis=1)
 
     df_map['Entity_Type'] = np.where(
         df_map['respondent_id_ferc714'].isin(rto_ids),
